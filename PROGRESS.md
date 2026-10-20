@@ -4,25 +4,21 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
 
 ## Current state
 
-- **Milestone:** M0 Setup. Everything Claude can do is done, committed and green in CI. M0 closes
-  when the three Dev-only items below are done.
+- **Milestone:** M0 Setup done (2026-10-20). Next: M1 Talking agent.
 - **Location:** `C:\Users\Devendra\Projects\Riley - HVAC`. Repo: https://github.com/waghdev/voice-agent-reference
-  (private until M7).
-- **Next step:** Dev does the three items marked **(Dev)**. Then Claude fills the LiveKit values with
-  `lk app env`, checks every key with a free call, and starts M1.
-- **Blockers:** M1 needs the keys in `.env` and `lk cloud auth`.
+  (private until M7). LiveKit project: `riley-kestrel-comfort-heating-a` (Build).
+- **Stack as built:** Deepgram STT + TTS (Dev's key), LLM `openai/gpt-4.1-nano` on LiveKit Inference
+  (free Build credit), `inference.TurnDetector()`, no-extra-charge noise cancellation.
+- **Next step:** M1. Build the agent session (greeting, turn handling, interruptions, silence,
+  end call, metrics), check it in text mode, then Dev talks to it in the console and picks a voice.
+- **Blockers:** none.
 
 ## Account checklist
 
-- [ ] **(Dev)** `lk cloud auth` in a VS Code terminal: it opens the browser to sign in to (or sign up
-      for) LiveKit Cloud and pick a Build-plan project. It needs an interactive terminal, so Claude
-      can't run it. Claude then writes `LIVEKIT_URL/API_KEY/API_SECRET` into `.env` with
-      `lk app env -w -d .env`.
-- [ ] **(Dev)** Paste `DEEPGRAM_API_KEY` and `GOOGLE_API_KEY` into `.env` (in the repo root, gitignored).
-      Put them in the file, not in chat, so they never end up in a transcript.
-- [ ] **(Dev)** In AI Studio → API keys, check the **Plan** column for the key's project says
-      **Free**. If it says Paid, billing is linked and calls are charged: create a new project with
-      no billing and make the key there.
+- [x] LiveKit Cloud sign-in (`lk cloud auth`, done by Dev); `.env` LiveKit values written with
+      `lk app env -w -d .env`
+- [x] Deepgram and Google keys in `.env` (Dev); both checked with free calls
+- [x] Gemini key's project is on the Free plan (Dev checked in AI Studio)
 - [x] LiveKit CLI 2.19.0 installed (winget)
 - [x] LiveKit Agent Skills installed in `.claude/skills/` (see decisions.md for the caveats)
 - [x] `livekit-docs` MCP server in `.mcp.json` (Claude Code asks once to approve it)
@@ -34,7 +30,7 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
 
 ## Milestones
 
-- [ ] M0 Setup (scaffold done 2026-10-20; waiting on accounts and keys)
+- [x] M0 Setup (2026-10-20)
 - [ ] M1 Talking agent
 - [ ] M2 Decision layer
 - [ ] M3 Booking and CRM
@@ -69,6 +65,7 @@ Gemini rate-limit hits). Target: $0.
 | 2026-10-20 | Build: 1,000 agent session min/month, 5 concurrent sessions, $2.50/month Inference credit, 1 US local number + 50 inbound min, 350 text / 60 audio simulation turns. Shared across all of Dev's free projects. |
 | 2026-10-20 | Turn detector (`inference.TurnDetector`): 7,500 requests/month when self-hosted; requests from agents deployed to LiveKit Cloud don't count. At the cap it falls back to the local `v1-mini` model. Adaptive interruptions: 40,000 requests/month self-hosted, then falls back to VAD-based detection. |
 | 2026-10-20 | **Gemini free tier is too slow for voice.** Dev's key (project on Free), from Dev's machine (plain round trip to Google 0.2–0.5 s), ~16:30–17:00 UTC, 4 runs each: `gemini-3.5-flash-lite` streaming time to first token median **16.3 s** (11–28 s); Priority via the Interactions API median 17.7 s; `serviceTier: priority` on generateContent median 13.7 s, but the response header said `standard` (silently downgraded). `gemini-3.8-flash`: three of four 503 "high demand" or timeout, one success at 60 s. Target total response is ≤ 0.9 s p50. Rule 8: Dev decides the LLM. |
+| 2026-10-20 | LiveKit Inference LLM benchmark (6 models × 8 calls, then 4 × 24): about 300 tiny requests, well under $0.05 of the $2.50 credit. Time to first token is ~1 s from India (gateway round trip 0.2–0.3 s); gpt-4.1-nano was best (0.76 s reply p50). Table in docs/decisions.md. |
 | 2026-10-20 | Deepgram key works (projects endpoint 200). The key has no `billing:read` scope, so check the credit balance in the Deepgram console. |
 | 2026-10-20 | Noise cancellation: ai-coustics `QUAIL_VF_S`/`QUAIL_VF_L` and Krisp VIVA cost extra. Krisp NC and ai-coustics `QUAIL_L` have no extra charge. LiveKit's own starter uses `QUAIL_VF_S`, so copying it would break rule 2. Build availability is not stated on the docs page; check the pricing page at M1. |
 
@@ -77,11 +74,16 @@ Gemini rate-limit hits). Target: $0.
 - **M1 choices approved by Dev (2026-10-20):** `inference.TurnDetector()`, a no-extra-charge noise
   cancellation model (`QUAIL_L` or Krisp NC), Gemini's default temperature of 1, fastest free Flash
   model by measurement. Details and reasons in docs/decisions.md.
-- **Gemini "paid" question:** Dev saw the Flash models as paid. Google's pricing page (2026-10-19)
-  lists all current Flash and Flash-Lite models as free on the free tier; the paid column applies to
-  projects with billing linked. Resolved once Dev confirms the key's project says Free (checklist).
-- **Gemini free-tier rate limits** are only shown per project in AI Studio (the docs page lists none).
-  Record what we hit at M1 in the quota log.
+- **LLM route changed (Dev approved):** the Gemini free tier measured 11–28 s to first token, so the
+  LLM is on LiveKit Inference (`openai/gpt-4.1-nano`) within the free credit. The credit covers
+  ~550 calls/month at nano prices, shared with any debugger audio-mode TTS. At M4 the public page's
+  `MAX_SESSIONS_PER_DAY` (40 in `.env.example`, too high for this budget) must drop to fit, and Riley
+  must close politely when the credit is exhausted.
+- **Latency budget is tight:** LLM time to first token alone is ~0.8–1.0 s from India, against a
+  0.9 s total target (end of turn + LLM + TTS). Local M1 numbers will include India↔US network
+  hops for STT, LLM and TTS; the headline numbers come from the deployed agent (M4). If they still
+  miss, levers are preemptive generation, prompt size, and inference priority (cost not documented;
+  check before using).
 - **Cold starts on Build:** the quotas page says agents may shut down after all sessions end, adding
   "up to 10 to 20 seconds of delay" before the agent joins. That conflicts with the ≤ 1,000 ms
   greeting target for a visitor's first call. Measure at M4; the page needs a "connecting" state
@@ -92,6 +94,16 @@ Gemini rate-limit hits). Target: $0.
   scaileai.com; check Vercel Hobby terms first).
 
 ## Session log
+
+### 2026-10-20: M0 done: keys, LLM route and model
+
+- Dev signed in to LiveKit Cloud; `lk app env` wrote the LiveKit values into `.env`. A
+  length-and-equality check (no values printed) confirmed Dev's other keys were untouched.
+- Deepgram and Gemini keys verified with free calls. The Gemini free tier was far too slow
+  (median 16 s to first token), so with Dev's approval the LLM moved to LiveKit Inference.
+- Benchmarked LiveKit Inference models; picked `openai/gpt-4.1-nano` (fastest p50 and p90, 12/12
+  tool calls, cheapest). Added `LLM_MODEL` to `.env` and `.env.example`.
+- Temperature: back to low (CLAUDE.md section 4), since the "default 1" exception was for Gemini 3.
 
 ### 2026-10-20: M0 tooling, repo and CI
 

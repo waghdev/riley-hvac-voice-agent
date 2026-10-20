@@ -2,6 +2,29 @@
 
 One entry per decision: date, decision, alternatives considered, reason. Newest at the top.
 
+## 2026-10-20: LLM model is openai/gpt-4.1-nano on LiveKit Inference
+
+- **Decision:** `LLM_MODEL=openai/gpt-4.1-nano`. Runner-up and first fallback:
+  `google/gemini-3.1-flash-lite` on LiveKit Inference. Last fallback: Gemini free tier (slow).
+- **Measured** from Dev's machine in India (gateway round trip 0.2–0.3 s), 12 runs per model, a
+  Riley-style system prompt and one tool, time to first token:
+
+  | Model | Reply p50 / p90 | Tool call p50 / p90 | ZIP tool call correct | Price in / out per 1M |
+  | --- | --- | --- | --- | --- |
+  | openai/gpt-4.1-nano | 0.76 / 1.32 s | 1.04 / 1.27 s | 12/12 | $0.10 / $0.40 |
+  | google/gemini-3.1-flash-lite | 0.90 / 1.53 s | 1.02 / 1.39 s | 12/12 | $0.25 / $1.50 |
+  | google/gemini-3.5-flash-lite | 0.94 / 1.98 s | 1.09 / 1.71 s | 12/12 | $0.30 / $2.50 |
+  | openai/gpt-oss-120b | 1.15 / 2.65 s | 1.08 / 2.31 s | 12/12 | $0.10 / $0.50 |
+
+  A first pass at 4 runs also tried `openai/gpt-4.1-mini` (one wrong tool call in four) and
+  `google/gemma-4-31b-it` (fast replies, slow tool calls: 1.73 s p50); neither went further.
+- **Why nano:** fastest on both p50 and p90, every tool call right, and cheapest, so the free credit
+  covers the most calls (~550/month). The decision layer (code decides, the LLM extracts and speaks)
+  means we don't need a bigger model's judgment. Re-check in the full pipeline at M1 and from
+  LiveKit Cloud at M4; switching is one env var.
+- **Temperature:** the "keep the default of 1" exception was specific to Gemini 3. With
+  gpt-4.1-nano, CLAUDE.md section 4 applies again: low temperature.
+
 ## 2026-10-20: LLM through LiveKit Inference, not the Gemini free tier (approved by Dev)
 
 - **Decision:** the LLM runs on LiveKit Inference (`inference.LLM`), paid from the Build plan's
