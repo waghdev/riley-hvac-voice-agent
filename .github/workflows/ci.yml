@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  lint-and-unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+
+      # --locked fails if uv.lock is out of date with pyproject.toml, so CI tests
+      # exactly the versions that were committed.
+      - run: uv sync --locked
+
+      - run: uv run ruff check
+
+      # No API keys in CI: tests that call a real LLM are marked `llm` and skipped.
+      - run: uv run pytest -m "not llm"
