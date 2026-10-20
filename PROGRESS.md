@@ -4,14 +4,34 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
 
 ## Current state
 
-- **Milestone:** M0 Setup done (2026-10-20). Next: M1 Talking agent.
+- **Milestone:** M1 Talking agent, in progress. The agent is built and checked in text mode; it
+  needs Dev's voice session (below) for the voice choice, live latency and barge-in checks.
 - **Location:** `C:\Users\Devendra\Projects\Riley - HVAC`. Repo: https://github.com/waghdev/voice-agent-reference
   (private until M7). LiveKit project: `riley-kestrel-comfort-heating-a` (Build).
-- **Stack as built:** Deepgram STT + TTS (Dev's key), LLM `openai/gpt-4.1-nano` on LiveKit Inference
-  (free Build credit), `inference.TurnDetector()`, no-extra-charge noise cancellation.
-- **Next step:** M1. Build the agent session (greeting, turn handling, interruptions, silence,
-  end call, metrics), check it in text mode, then Dev talks to it in the console and picks a voice.
-- **Blockers:** none.
+- **Stack as built:** Deepgram `nova-3` STT + Aura-2 TTS (Dev's key), LLM
+  `google/gemini-3.1-flash-lite` on LiveKit Inference (free Build credit), `inference.TurnDetector()`,
+  bundled Silero VAD, ai-coustics `QUAIL_L`.
+- **Next step:** Dev's M1 voice session: pick a voice from `voice-samples/`, then talk to Riley in
+  the Agent Console (steps in "M1 voice session" below). Claude then runs the latency report,
+  tunes, and closes M1.
+- **Blockers:** M1 can't close without that session (listening and live audio).
+
+## M1 voice session (Dev, about 10 minutes)
+
+1. Restart VS Code (so its terminals see `uv` and `lk`, which were installed during the session).
+2. Listen to the seven samples in `voice-samples\` (same script, read by each voice; the script
+   is in `voice-samples\script.txt`). Pick one or two.
+3. In a VS Code terminal: `uv run python -m agent.main dev` (leave it running).
+4. Open https://cloud.livekit.io, pick the project, go to Agents, and use **Launch Console** for
+   `riley`. Allow the microphone.
+5. Try: a normal intake call; pause mid-sentence ("my AC is... um... making a clicking noise");
+   say "mm-hmm" while Riley talks (it should keep going); cut in with "wait, actually" (it should
+   stop fast); stay silent for about 20 s (two check-ins, then goodbye); and end with "that's all,
+   bye".
+6. Tell Claude which voice and how it felt. Claude reads `metrics/` and writes the numbers here.
+
+Fallback if the console isn't reachable: `uv run python -m agent.main console` talks through the
+PC's mic and speakers in the terminal (no WebRTC, so its latency isn't the web number).
 
 ## Account checklist
 
@@ -31,7 +51,7 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
 ## Milestones
 
 - [x] M0 Setup (2026-10-20)
-- [ ] M1 Talking agent
+- [ ] M1 Talking agent (built and text-tested; waiting on Dev's voice session)
 - [ ] M2 Decision layer
 - [ ] M3 Booking and CRM
 - [ ] M4 Web call page
@@ -49,7 +69,7 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
 | Barge-in stop time | ≤ 300 ms | | |
 | Backchannels ignored | yes | | |
 | Numbers, ZIPs, times spoken correctly | yes | | |
-| Silence handling and clean end-call | yes | | |
+| Silence handling and clean end-call | yes | Text mode: check-ins, close and end_call work; unit and behavior tests green. Audio not yet checked | 2026-10-20 |
 | Scenario suite pass rate | 100% | | |
 | QA grader: critical findings | 0 | | |
 | Dev's listening check vs Retell standard | pass | | |
@@ -66,6 +86,9 @@ Gemini rate-limit hits). Target: $0.
 | 2026-10-20 | Turn detector (`inference.TurnDetector`): 7,500 requests/month when self-hosted; requests from agents deployed to LiveKit Cloud don't count. At the cap it falls back to the local `v1-mini` model. Adaptive interruptions: 40,000 requests/month self-hosted, then falls back to VAD-based detection. |
 | 2026-10-20 | **Gemini free tier is too slow for voice.** Dev's key (project on Free), from Dev's machine (plain round trip to Google 0.2–0.5 s), ~16:30–17:00 UTC, 4 runs each: `gemini-3.5-flash-lite` streaming time to first token median **16.3 s** (11–28 s); Priority via the Interactions API median 17.7 s; `serviceTier: priority` on generateContent median 13.7 s, but the response header said `standard` (silently downgraded). `gemini-3.8-flash`: three of four 503 "high demand" or timeout, one success at 60 s. Target total response is ≤ 0.9 s p50. Rule 8: Dev decides the LLM. |
 | 2026-10-20 | LiveKit Inference LLM benchmark (6 models × 8 calls, then 4 × 24): about 300 tiny requests, well under $0.05 of the $2.50 credit. Time to first token is ~1 s from India (gateway round trip 0.2–0.3 s); gpt-4.1-nano was best (0.76 s reply p50). Table in docs/decisions.md. |
+| 2026-10-20 | M1 work on LiveKit Inference: ~25 behavior-suite runs plus debugger calls, roughly $0.20–0.30 of the $2.50 credit (estimate from token counts; check the Usage page in LiveKit Cloud). One suite run is about $0.01. |
+| 2026-10-20 | Deepgram: 7 voice samples, ~3,700 characters of Aura-2 (about $0.11 of the $200 credit). First byte for a 534-character request was 0.8–1.1 s from India. |
+| 2026-10-20 | Text-mode debugger (no audio), from India: LLM first token p50 815 ms, p90 1,046 ms (11 turns); greeting start 1.5 s, and 4.0 s on a cold start, already over the 1 s target before TTS. If the live session confirms it, pre-synthesize the fixed greeting at startup (`say()` accepts audio). |
 | 2026-10-20 | Deepgram key works (projects endpoint 200). The key has no `billing:read` scope, so check the credit balance in the Deepgram console. |
 | 2026-10-20 | Noise cancellation: ai-coustics `QUAIL_VF_S`/`QUAIL_VF_L` and Krisp VIVA cost extra. Krisp NC and ai-coustics `QUAIL_L` have no extra charge. LiveKit's own starter uses `QUAIL_VF_S`, so copying it would break rule 2. Build availability is not stated on the docs page; check the pricing page at M1. |
 
@@ -75,10 +98,13 @@ Gemini rate-limit hits). Target: $0.
   cancellation model (`QUAIL_L` or Krisp NC), Gemini's default temperature of 1, fastest free Flash
   model by measurement. Details and reasons in docs/decisions.md.
 - **LLM route changed (Dev approved):** the Gemini free tier measured 11–28 s to first token, so the
-  LLM is on LiveKit Inference (`openai/gpt-4.1-nano`) within the free credit. The credit covers
-  ~550 calls/month at nano prices, shared with any debugger audio-mode TTS. At M4 the public page's
-  `MAX_SESSIONS_PER_DAY` (40 in `.env.example`, too high for this budget) must drop to fit, and Riley
-  must close politely when the credit is exhausted.
+  LLM is on LiveKit Inference within the free credit. After the behavior suite it's
+  `google/gemini-3.1-flash-lite` (nano failed it), which the credit covers for ~220 calls/month,
+  shared with dev testing and any debugger audio-mode TTS. At M4 the public page's
+  `MAX_SESSIONS_PER_DAY` (40 in `.env.example`) must drop to about 5, and Riley must close politely
+  when the credit is exhausted.
+- **Riley doesn't say the caller's name** (M1 prompt): "at most once" still repeated it in 1 of 4
+  runs. Revisit at M5 with pass rates if Dev wants a single "Thanks, Jordan".
 - **Latency budget is tight:** LLM time to first token alone is ~0.8–1.0 s from India, against a
   0.9 s total target (end of turn + LLM + TTS). Local M1 numbers will include India↔US network
   hops for STT, LLM and TTS; the headline numbers come from the deployed agent (M4). If they still
@@ -94,6 +120,22 @@ Gemini rate-limit hits). Target: $0.
   scaileai.com; check Vercel Hobby terms first).
 
 ## Session log
+
+### 2026-10-20: M1 agent built and text-tested
+
+- `src/agent/main.py`: Riley session with Deepgram nova-3 + Aura-2, LiveKit Inference LLM, audio
+  turn detector, bundled Silero VAD, ai-coustics `QUAIL_L`, non-interruptible greeting,
+  `EndCallTool`, 7 s silence check-ins, 5-minute limit, room deleted on every close. Every API
+  checked with `lk docs` and the installed 1.8.8 source (the MCP server wasn't live this session).
+- `prompts.py`, `config.py`, `metrics.py` (per-turn JSONL from `ChatMessage.metrics`),
+  `silence.py`, `scripts/latency_report.py`; 46 unit tests (CI green).
+- Driving Riley in `lk agent debugger` found six bugs. Each became a test before its fix (rule 7):
+  hung up mid-call when input was typed (unit test); re-asked for the problem; name on consecutive
+  turns; invented "yes, we do duct cleaning"; `end_call` fired four times with two goodbyes; then
+  `end_call` looped (behavior tests, `tests/behavior/`, marked `llm`).
+- Switched the LLM from gpt-4.1-nano to gemini-3.1-flash-lite: the behavior suite measures
+  instruction following, which the speed benchmark didn't (decisions.md).
+- Seven Aura-2 voice samples generated in `voice-samples/` (gitignored) for Dev to choose from.
 
 ### 2026-10-20: M0 done: keys, LLM route and model
 
