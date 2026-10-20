@@ -2,6 +2,24 @@
 
 One entry per decision: date, decision, alternatives considered, reason. Newest at the top.
 
+## 2026-10-20: LLM through LiveKit Inference, not the Gemini free tier (approved by Dev)
+
+- **Decision:** the LLM runs on LiveKit Inference (`inference.LLM`), paid from the Build plan's
+  $2.50/month Inference credit. On Build the credit is a hard cap, so the cost stays $0. The model is
+  chosen by a benchmark (time to first token, tool-call correctness) among cheap fast models.
+  The Gemini free tier (Dev's own key) stays available as a fallback (it's slow).
+  This overrides CLAUDE.md section 10 ("LiveKit Inference: avoid by default") for the LLM only;
+  STT and TTS stay on Deepgram with Dev's key.
+- **Why:** measured on 2026-10-20, the Gemini free tier took a median 16.3 s to first token on
+  `gemini-3.5-flash-lite`, and `gemini-3.8-flash` mostly returned 503. Requesting the free Priority
+  tier was silently downgraded to standard. The quality bar needs a total response ≤ 0.9 s p50.
+- **Alternatives:** Groq free tier (fast, but free limits are visible only after sign-up, and the
+  paid plan's 8K tokens/min is already tight for one call); Cerebras (needs a payment method on
+  file, 5 requests/min); paid Gemini (breaks rule 2).
+- **Consequence:** the credit covers roughly 150–550 calls a month depending on the model (about
+  20 LLM requests × 2K tokens per call). The public page's daily cap (`MAX_SESSIONS_PER_DAY`) must
+  fit that budget, and Riley must close politely if the credit runs out mid-month (M4).
+
 ## 2026-10-20: LiveKit Agent Skills installed for Claude Code
 
 - **Decision:** `lk skills install --agent claude-code --skip-mcp` added LiveKit's seven skills to
