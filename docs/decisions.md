@@ -2,6 +2,40 @@
 
 One entry per decision: date, decision, alternatives considered, reason. Newest at the top.
 
+## 2026-10-20: LiveKit Agent Skills installed for Claude Code
+
+- **Decision:** `lk skills install --agent claude-code --skip-mcp` added LiveKit's seven skills to
+  `.claude/skills/` (MIT, from `livekit/agent-skills`), recorded in `skills-lock.json`.
+  `lk skills update` refreshes them.
+- **Where they conflict with CLAUDE.md, CLAUDE.md wins:**
+  - `building-livekit-agents` assumes LiveKit Inference for models. We use provider plugins with
+    our own keys (section 10). The turn detector is the one Inference model we use (it has its own
+    free allowance).
+  - `debugging-livekit-agents` audio mode speaks test lines through LiveKit Inference TTS, which
+    spends the $2.50/month credit. Default to text mode; use audio mode only for hearing bugs.
+  - `running-livekit-simulations`: Build allows 350 text and 60 audio simulation turns a month
+    (hard cap, no charge). Generating scenarios from source uploads our code to LiveKit; that's fine
+    for this repo (no client material, no secrets in source).
+
+## 2026-10-20: M1 model and audio choices (approved by Dev)
+
+- **Turn detector:** `inference.TurnDetector()` (audio-based, LiveKit's current recommendation).
+  Not the text `MultilingualModel` plugin, which is deprecated for 2.0. Free on Build: 7,500
+  requests/month when self-hosted, unlimited when deployed to LiveKit Cloud, local `v1-mini` fallback
+  at the cap.
+- **Noise cancellation:** only models with no extra charge, ai-coustics `QUAIL_L` or Krisp NC,
+  compared by listening at M1. Not `QUAIL_VF_S` (LiveKit's starter default), which costs extra.
+- **Temperature:** Gemini's default of 1, per LiveKit's Gemini plugin docs (other values can cause
+  looping on Gemini 3). This replaces "low LLM temperature" in CLAUDE.md section 4. Consistency
+  comes from a short prompt, exact scripts from `business.yaml`, and gates; checked in M5.
+- **Gemini model:** the fastest free-tier Flash model that handles tool calls well, chosen by
+  measurement at M1. Start with `gemini-3.5-flash-lite` (Google: "our fastest ... 3.5 model") and
+  compare with `gemini-3.8-flash`.
+- **Free tier check:** Google's pricing page (updated 2026-10-19) lists every current Flash and
+  Flash-Lite model as "Free of charge" on the free tier. The tier is set by the billing account of
+  the key's Google Cloud project: a project with billing linked is "Paid" and gets charged. The
+  key must come from a project whose Plan column in AI Studio says Free.
+
 ## 2026-10-20: LiveKit docs MCP server at project scope
 
 - **Decision:** `livekit-docs` (`https://docs.livekit.io/mcp`) is registered in `.mcp.json`, committed
