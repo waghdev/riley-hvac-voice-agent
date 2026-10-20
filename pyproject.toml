@@ -6,7 +6,9 @@ readme = "README.md"
 # One minor version, matching local dev and CI. LiveKit Agents supports >=3.10,<3.15.
 requires-python = ">=3.13,<3.14"
 dependencies = [
-    "livekit-agents[deepgram,google,silero]==1.8.8",
+    # No silero extra: AgentSession bundles Silero VAD (inference.VAD) when none is passed.
+    "livekit-agents[deepgram,google]==1.8.8",
+    "livekit-plugins-ai-coustics==0.3.5",
     "python-dotenv==1.2.4",
     "pyyaml==6.0.3",
 ]
