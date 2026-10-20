@@ -1,8 +1,9 @@
 # CLAUDE.md: voice-agent-reference
 
 Read this file fully at the start of every session, then read PROGRESS.md before doing anything.
-Project location on Dev's machine: `C:\Users\Devendra\Projects\voice-agent-reference` (Windows; use
-paths and shell commands that work there, PowerShell by default).
+Project location on Dev's machine: `C:\Users\Devendra\Projects\Riley - HVAC` (Windows; use
+paths and shell commands that work there, PowerShell by default; quote the path, it has spaces).
+The repo, Python project and GitHub repo are named `voice-agent-reference`.
 This file says WHAT we are building and the rules. PROGRESS.md says WHERE we are.
 
 ---
