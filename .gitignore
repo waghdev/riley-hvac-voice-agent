@@ -16,3 +16,4 @@ web/.next/
 .claude/settings.local.json
 dist/
 *.egg-info/
+voice-samples/
