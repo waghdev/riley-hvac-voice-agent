@@ -1,0 +1,108 @@
+# Machine-readable business facts for Kestrel Comfort Heating & Air (fictional).
+#
+# Source of truth: docs/business.md. Prompts and gates read from this file, never from
+# hardcoded strings. tests/unit/test_business_config.py fails if the two drift apart.
+#
+# This file holds facts and thresholds only. The rules that combine them (for example
+# the AND/OR structure of the urgency rule) live in src/agent/gates.py.
+
+business:
+  name: Kestrel Comfort Heating & Air
+  spoken_name: Kestrel Comfort Heating and Air  # how it's said out loud (no "&")
+  location: Phoenix, Arizona
+  customers: residential
+  timezone: America/Phoenix  # no daylight saving
+
+agent:
+  name: Riley
+  language: en
+
+# Lines Riley must say word for word.
+scripts:
+  greeting: >-
+    Thanks for calling Kestrel Comfort Heating and Air, this is Riley, a virtual assistant.
+    This call may be recorded for quality. How can I help you today?
+  safety: >-
+    For your safety, please leave the house now and, once you're outside, call 911 and your
+    gas utility. Don't use light switches or anything that could spark. Once you're safe and
+    it's been checked, call us back and we'll get a technician out.
+  price_question: >-
+    The technician will give you an exact price after diagnosing it, before any work starts.
+
+services:
+  # Category ids the LLM may pass to record_issue. Anything else is not offered.
+  offered:
+    ac_repair: Air conditioner not cooling, not turning on, leaking, making noise
+    heating_repair: Furnace or heater not heating
+    heat_pump_repair: Heat pump problems
+    thermostat: Thermostat not working or blank
+    maintenance: Seasonal tune-up
+    new_system_estimate: Free in-home estimate for a new system
+  # Named so the prompt can recognise them and the gate can decline politely.
+  not_offered:
+    commercial_or_rooftop: Commercial or rooftop units
+    duct_cleaning: Duct cleaning
+    water_heater_or_plumbing: Water heaters or plumbing
+    electrical_panel: Electrical panels
+    mobile_home: Mobile homes
+
+service_area:
+  description: central Phoenix  # used when declining; no referrals to other companies
+  # Quoted so YAML keeps them as strings. ZIP+4 is accepted; the gate uses the first five.
+  zip_codes:
+    - "85003"
+    - "85004"
+    - "85006"
+    - "85007"
+    - "85008"
+    - "85012"
+    - "85013"
+    - "85014"
+    - "85015"
+    - "85016"
+    - "85018"
+    - "85020"
+
+# The only prices Riley may say. Repair and replacement prices are never quoted.
+pricing:
+  currency: USD
+  diagnostic_fee: 89
+  diagnostic_fee_waived_if_repair_approved_same_visit: true
+  new_system_estimate_fee: 0
+
+booking:
+  days: [monday, tuesday, wednesday, thursday, friday, saturday]  # no Sunday
+  # Local time (America/Phoenix), 24-hour clock, earliest first.
+  windows:
+    - {start: "08:00", end: "10:00"}
+    - {start: "10:00", end: "12:00"}
+    - {start: "12:00", end: "14:00"}
+    - {start: "14:00", end: "16:00"}
+    - {start: "16:00", end: "18:00"}
+  max_windows_offered: 2
+  # Priority calls get the earliest window today, else the earliest tomorrow, and are
+  # told a dispatcher will call if an earlier slot opens.
+  priority_mentions_dispatcher_callback: true
+
+urgency:
+  no_cooling_categories: [ac_repair, heat_pump_repair]
+  no_heat_categories: [heating_repair]
+  indoor_temp_priority_f: 90  # reported indoor temperature at or above this is priority
+  vulnerable_occupants:
+    - age_65_plus
+    - infant
+    - heat_affected_medical_condition
+
+safety:
+  # Any one of these, on any turn, overrides everything: say scripts.safety, end the call.
+  signals: [gas_smell, co_alarm, burning_smell, sparks, smoke]
+
+readiness:
+  required_fields: [first_name, callback_number, zip_code, category, symptoms]
+  callback_number_digits: 10  # US numbers
+  read_back_before_booking: [callback_number, window]
+
+callback:
+  reasons: [billing, existing_appointment, complaint, wants_human, other]
+  required_fields: [first_name, callback_number, reason]
+  promise: a team member will call back within one business day
