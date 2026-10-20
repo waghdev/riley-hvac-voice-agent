@@ -4,27 +4,33 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
 
 ## Current state
 
-- **Milestone:** M0 Setup. Scaffold done and committed; M0 closes when Dev's account checklist is done.
-- **Location:** `C:\Users\Devendra\Projects\Riley - HVAC` (CLAUDE.md says `...\voice-agent-reference`;
-  see open questions). The Python project and the GitHub repo are named `voice-agent-reference`.
-- **Next step:** Dev finishes the account checklist and fills `.env`. Then Dev answers the four M1
-  proposals below, and M1 starts.
-- **Blockers:** M1 needs the LiveKit, Deepgram and Google AI Studio keys.
+- **Milestone:** M0 Setup. Everything Claude can do is done, committed and green in CI. M0 closes
+  when the three Dev-only items below are done.
+- **Location:** `C:\Users\Devendra\Projects\Riley - HVAC`. Repo: https://github.com/waghdev/voice-agent-reference
+  (private until M7).
+- **Next step:** Dev does the three items marked **(Dev)**. Then Claude fills the LiveKit values with
+  `lk app env`, checks every key with a free call, and starts M1.
+- **Blockers:** M1 needs the keys in `.env` and `lk cloud auth`.
 
-## Account checklist (Dev)
+## Account checklist
 
-- [ ] LiveKit Cloud account, Build (free) plan, new project; note URL, API key, API secret
-- [ ] LiveKit CLI installed (`winget install LiveKit.LiveKitCLI`) and authenticated (`lk cloud auth`)
-- [ ] Optional: `lk skills install` in the repo (LiveKit's Agent Skills for Claude Code, including
-      `debugging-livekit-agents`)
-- [ ] Approve the `livekit-docs` MCP server when Claude Code asks (it's in `.mcp.json`)
-- [ ] Deepgram account; API key ($200 signup credit)
-- [ ] Google AI Studio API key (Gemini free tier); note which Flash model ids are on the free tier and
-      their rate limits (see M1 proposal 4)
+- [ ] **(Dev)** `lk cloud auth` in a VS Code terminal: it opens the browser to sign in to (or sign up
+      for) LiveKit Cloud and pick a Build-plan project. It needs an interactive terminal, so Claude
+      can't run it. Claude then writes `LIVEKIT_URL/API_KEY/API_SECRET` into `.env` with
+      `lk app env -w -d .env`.
+- [ ] **(Dev)** Paste `DEEPGRAM_API_KEY` and `GOOGLE_API_KEY` into `.env` (in the repo root, gitignored).
+      Put them in the file, not in chat, so they never end up in a transcript.
+- [ ] **(Dev)** In AI Studio → API keys, check the **Plan** column for the key's project says
+      **Free**. If it says Paid, billing is linked and calls are charged: create a new project with
+      no billing and make the key there.
+- [x] LiveKit CLI 2.19.0 installed (winget)
+- [x] LiveKit Agent Skills installed in `.claude/skills/` (see decisions.md for the caveats)
+- [x] `livekit-docs` MCP server in `.mcp.json` (Claude Code asks once to approve it)
+- [x] `.env` created from `.env.example` (gitignored, `GEMINI_MODEL=gemini-3.5-flash-lite`)
+- [x] GitHub repo created, private, pushed; CI green
 - [ ] (M4) Vercel account (Hobby, free) for the public web-call page
 - [ ] (M4) Cloudflare account; Turnstile site key and secret (free)
 - [ ] (M6) Claim the 1 free US local number in LiveKit Cloud
-- [ ] GitHub repo `voice-agent-reference`, private until M7; add it as `origin` and push so CI runs
 
 ## Milestones
 
@@ -66,39 +72,39 @@ Gemini rate-limit hits). Target: $0.
 
 ## Open questions
 
-### M1 proposals (need Dev's yes before M1 code)
-
-The docs have moved on since CLAUDE.md was written (rule 6: the docs win, so these are flagged here).
-
-1. **Turn detector:** use `inference.TurnDetector()`, the audio-based model LiveKit now recommends.
-   The text-based `MultilingualModel` (`livekit-plugins-turn-detector`) is deprecated and will be
-   removed in 2.0. It runs on LiveKit Inference but uses its own free allowance (above), not the
-   $2.50 credit that CLAUDE.md section 10 says to avoid. Recommendation: yes.
-2. **Noise cancellation:** ai-coustics `QUAIL_L` or Krisp NC (both no extra charge), not the
-   starter's `QUAIL_VF_S`. Compare by listening at M1 once Build availability is confirmed.
-3. **LLM temperature:** LiveKit's Gemini docs say to leave `temperature` at its default of 1 for
-   Gemini 3 models, because other values can cause looping or odd reasoning. CLAUDE.md section 4
-   asks for a low temperature. Recommendation: follow the docs, keep consistency through the short
-   prompt, exact scripts and gates, and measure it in M5. If tone drifts, revisit.
-4. **Gemini model id:** the plugin docs list `gemini-3.8-flash`, `gemini-3.5-flash`,
-   `gemini-3.5-flash-lite` and `gemini-3.1-flash-lite` as current. Dev checks which are on the AI
-   Studio free tier and their rate limits; we pick the fastest one that handles tool calls well.
-
-### Other
-
+- **M1 choices approved by Dev (2026-10-20):** `inference.TurnDetector()`, a no-extra-charge noise
+  cancellation model (`QUAIL_L` or Krisp NC), Gemini's default temperature of 1, fastest free Flash
+  model by measurement. Details and reasons in docs/decisions.md.
+- **Gemini "paid" question:** Dev saw the Flash models as paid. Google's pricing page (2026-10-19)
+  lists all current Flash and Flash-Lite models as free on the free tier; the paid column applies to
+  projects with billing linked. Resolved once Dev confirms the key's project says Free (checklist).
+- **Gemini free-tier rate limits** are only shown per project in AI Studio (the docs page lists none).
+  Record what we hit at M1 in the quota log.
 - **Cold starts on Build:** the quotas page says agents may shut down after all sessions end, adding
   "up to 10 to 20 seconds of delay" before the agent joins. That conflicts with the ≤ 1,000 ms
   greeting target for a visitor's first call. Measure at M4; the page needs a "connecting" state
   either way. Possible rule 8 conversation.
-- **Project folder:** the repo lives in `Riley - HVAC`, not `voice-agent-reference` as CLAUDE.md
-  says. Everything works with the space in the path. Either rename the folder (Claude Code's memory
-  for this project is keyed to the path, so it would start fresh) or update CLAUDE.md. Dev's call.
 - Agent structure: single Agent with tools vs handoffs/tasks. Decide at M2 after checking current docs.
 - Deepgram Aura voice vs Cartesia: compare at M1 by listening; Deepgram is the default.
 - Web starter: agent-starter-react vs the web embed starter. Decide at M4 (embed could later sit on
   scaileai.com; check Vercel Hobby terms first).
 
 ## Session log
+
+### 2026-10-20: M0 tooling, repo and CI
+
+- Dev approved the four M1 choices; logged in docs/decisions.md.
+- Checked Gemini pricing: Flash models have a free tier; "paid" comes from a billing-linked project.
+- CLAUDE.md now points at `C:\Users\Devendra\Projects\Riley - HVAC`.
+- Installed LiveKit CLI 2.19.0 and LiveKit's seven Agent Skills (`.claude/skills/`, `skills-lock.json`).
+  Read them: where they assume LiveKit Inference, CLAUDE.md section 10 wins (caveats in decisions.md).
+- `lk cloud auth` refuses to run without an interactive terminal, so it's on Dev's list.
+- Created `.env` from `.env.example` (gitignored, keys empty).
+- Created https://github.com/waghdev/voice-agent-reference (private) and pushed, after a secret scan
+  of the full history. The first CI run failed: `astral-sh/setup-uv` has no floating `v10` tag. Pinned
+  `setup-uv@v10.3.0`, `checkout@v7.0.1` and `ubuntu-24.04`; CI green in 16 s.
+- Dev's standing preference: Claude does everything it can and only escalates what needs Dev
+  (saved to Claude Code memory).
 
 ### 2026-10-20: M0 scaffold
 
