@@ -2,6 +2,55 @@
 
 One entry per decision: date, decision, alternatives considered, reason. Newest at the top.
 
+## 2026-10-20: LLM switched to google/gemini-3.1-flash-lite (behavior tests beat the benchmark)
+
+- **Decision:** `LLM_MODEL=google/gemini-3.1-flash-lite` on LiveKit Inference, at the model's
+  default temperature (unset `LLM_TEMPERATURE`), with `parallel_tool_calls: False`.
+- **Why:** the earlier pick, gpt-4.1-nano, was fastest in the TTFT benchmark but failed Riley's
+  behavior suite: 5 of 12 passes over two runs (it re-asked for the problem, hung up as soon as it
+  had the ZIP, and didn't hang up when the caller said bye). Same suite, same prompt:
+  gemini-3.1-flash-lite 11/12, gpt-4.1-mini 9/12. After the prompt fixes below,
+  gemini-3.1-flash-lite passed 7/7 on repeated runs. It costs ~0.15 s more time to first token
+  (0.90 vs 0.76 s p50) and ~2.5× the credit per call (~220 calls/month vs ~550).
+- **Temperature:** Gemini 3 again, so LiveKit's Gemini guidance applies: keep the default.
+  `LLM_TEMPERATURE` exists for models where lowering it is safe.
+- **Lesson:** a speed benchmark with one tool call doesn't measure instruction following; pick by
+  the behavior suite, then check latency.
+
+## 2026-10-20: M1 talking agent: how each quality-bar item is met
+
+All APIs checked against livekit-agents 1.8.8 docs (`lk docs`) and the installed source.
+
+- **Structure for M1:** one `Riley` agent with `EndCallTool`. Whether M2 uses one agent with tools,
+  handoffs or tasks is still open (it's decided with the gates).
+- **STT:** Deepgram `nova-3`, `en-US`, keyterm `Kestrel` (static, so no extra LLM calls from
+  automatic keyterm detection). Deepgram Flux (`STTv2`, its own end-of-turn model) is a tuning
+  option if endpointing numbers need it.
+- **Turn detection:** `inference.TurnDetector()` (approved earlier). Endpointing, adaptive
+  interruptions, false-interruption resume and preemptive LLM generation use the defaults, which
+  already match section 4; tune from measurements.
+- **VAD:** the session's bundled Silero (`inference.VAD(model="silero")`, local). The separate
+  `livekit-plugins-silero` (and onnxruntime) was dropped from dependencies.
+- **Noise cancellation:** ai-coustics `QUAIL_L` on the agent side. LiveKit's pricing data lists
+  background noise suppression (Krisp NC, `QUAIL_L`) as included on Build; voice isolation models
+  get only 100 minutes, so they're avoided.
+- **Greeting:** `session.say(greeting, allow_interruptions=False)` in `on_enter`, so the recording
+  disclosure can't be talked over; `EndCallTool(ignore_on_enter=True)` so it can't end the call.
+- **Ending:** every way a call ends closes the session, and `RoomOptions.delete_room_on_close`
+  deletes the room, which disconnects the caller (phone included) and ends the job. The tool's
+  result is a custom line; the default made the model loop on `end_call`.
+- **Silence:** `user_away_timeout=7` plus `SilenceMonitor` (two "Are you still there?" check-ins,
+  then a fixed goodbye). Fixed lines are `say()`, not generated: identical every call, no tokens.
+  Caller messages call `session.reset_away_timer()`, because typed input doesn't go through VAD.
+- **Time limit:** no built-in option exists, so a task closes the call after `MAX_CALL_SECONDS`.
+- **Latency metrics:** `ChatMessage.metrics` from `conversation_item_added`. The session-level
+  `metrics_collected` event is deprecated. One JSON line per turn in `metrics/`; greeting start is
+  measured from just before `session.start()`. On LiveKit Cloud the filesystem isn't kept, so M4
+  needs another sink (logs).
+- **Prompt rules that came from bugs:** each has a behavior test in `tests/behavior/`. Riley doesn't
+  say the caller's name at all, because "at most once" still produced "Nice to meet you, Jordan" then
+  "Thanks, Jordan" in 1 of 4 runs.
+
 ## 2026-10-20: LLM model is openai/gpt-4.1-nano on LiveKit Inference
 
 - **Decision:** `LLM_MODEL=openai/gpt-4.1-nano`. Runner-up and first fallback:
