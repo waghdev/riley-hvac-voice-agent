@@ -37,11 +37,13 @@ from livekit.agents.beta.tools import EndCallTool
 from livekit.agents.llm import ChatMessage
 from livekit.plugins import ai_coustics, deepgram
 
-from agent import prompts
+from agent import prompts, tools
 from agent.config import DEFAULT_TTS_VOICE, REPO_ROOT, load_business
 from agent.greeting_audio import GreetingClip, load_greeting
 from agent.metrics import JsonlWriter, TurnPairer
 from agent.silence import SilenceMonitor
+from agent.spoken import NameGuard, speak_numbers_stream
+from agent.state import CallState, Outcome
 
 load_dotenv(REPO_ROOT / ".env")
 logger = logging.getLogger("riley")
@@ -107,6 +109,8 @@ class Riley(Agent):
         super().__init__(
             instructions=prompts.build_instructions(BUSINESS),
             tools=[
+                # The decision layer: each tool runs the gates in gates.py (see tools.py).
+                *tools.ALL_TOOLS,
                 # ignore_on_enter: the model can't end the call during the greeting.
                 # delete_room=False: the session's close handler deletes the room for every way
                 # a call ends, after closing background audio (see finish_call below).
@@ -117,6 +121,7 @@ class Riley(Agent):
                     ignore_on_enter=True,
                     delete_room=False,
                     end_instructions=prompts.END_CALL_RESULT,
+                    on_tool_completed=tools.no_second_goodbye,
                 ),
             ],
         )
@@ -143,15 +148,30 @@ async def entrypoint(ctx: JobContext) -> None:
     # Phone calls (SIP participants) get their own label in M6.
     channel = "console" if ctx.is_fake_job() else "web"
 
-    session = AgentSession(
+    state = CallState(call_id=call_id)  # everything Riley learns on this call; tools write it
+
+    session = AgentSession[CallState](
         stt=deepgram.STT(model="nova-3", language="en-US", keyterm=["Kestrel"]),
         llm=build_llm(),
         tts=deepgram.TTS(model=TTS_VOICE),
         # The audio turn detector is also the default; it's explicit here because it's what
         # stops Riley cutting in when a caller pauses mid-sentence. Interruptions, false-
         # interruption recovery and preemptive generation use their defaults (all on).
-        turn_handling=TurnHandlingOptions(turn_detection=inference.TurnDetector()),
+        # max_delay is tools.py's DEFAULT_MAX_DELAY; tools shorten it for short answers.
+        turn_handling=TurnHandlingOptions(
+            turn_detection=inference.TurnDetector(),
+            endpointing={"max_delay": tools.DEFAULT_MAX_DELAY},
+        ),
         user_away_timeout=SILENCE_SECONDS,
+        userdata=state,
+        # What TTS hears: LiveKit's markdown and emoji filters (the defaults, kept), the caller's
+        # name at most once per call, then numbers spoken the way people say them.
+        tts_text_transforms=[
+            "filter_markdown",
+            "filter_emoji",
+            NameGuard(lambda: state.first_name),
+            speak_numbers_stream,
+        ],
     )
 
     pairer = TurnPairer(call_id=call_id, channel=channel, session_started_at=time.time())
@@ -188,6 +208,10 @@ async def entrypoint(ctx: JobContext) -> None:
             # monitor and the session's away timer that the caller is active.
             silence.on_caller_turn()
             session.reset_away_timer()
+            # The short-answer wait applies to one answer only; the next tool sets it again if
+            # Riley's next question also has a short answer.
+            state.expecting = None
+            session.update_options(endpointing_opts=tools.endpointing_for(state))
         record = pairer.add(ev.item.role, ev.item.metrics or {})
         if record:
             writer.write(record)
@@ -228,6 +252,10 @@ async def entrypoint(ctx: JobContext) -> None:
         silence.stop()
         if limit_task is not None:
             limit_task.cancel()
+        # Every call ends in exactly one outcome; a call no gate settled is incomplete.
+        if state.outcome is None:
+            state.outcome = Outcome.INCOMPLETE
+        logger.info("call outcome", extra={"outcome": state.outcome.value})
         finishing = asyncio.create_task(finish_call(f"session closed: {ev.reason}"))
 
     await session.start(

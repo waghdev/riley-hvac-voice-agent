@@ -9,7 +9,8 @@ next_step values:
     ask:<field>               ask for that field next (main.py shortens endpointing for it)
     offer_windows             everything checks out; move to scheduling
     take_callback_details     switch to taking a callback request
-    end_call                  say the closing line, then end the call
+    end_call                  the call is over: say what `say` asks and one goodbye; tools.py
+                              hangs up after that reply (so `say` never adds a goodbye itself)
     say_exact_then_end_call   say `say`'s quoted script word for word, then end the call
 """
 
@@ -104,10 +105,7 @@ def service_area_gate(state: CallState, cfg: BusinessConfig) -> GateResult:
     return GateResult(
         Decision.OUT_OF_AREA,
         reason=f"zip_not_served:{state.zip_code}",
-        say=(
-            f"Apologize: we only serve {cfg.service_area}. Don't suggest other companies. "
-            "Then say a short goodbye."
-        ),
+        say=f"Apologize: we only serve {cfg.service_area}. Don't suggest other companies.",
         next_step="end_call",
     )
 
@@ -123,7 +121,7 @@ def service_offered_gate(state: CallState, cfg: BusinessConfig) -> GateResult:
         reason=f"not_offered:{state.category}",
         say=(
             f"Apologize: {what.lower()} isn't something we handle; we do residential heating "
-            "and cooling. Don't suggest other companies. Then say a short goodbye."
+            "and cooling. Don't suggest other companies."
         ),
         next_step="end_call",
     )
@@ -211,7 +209,7 @@ def failed_attempt_gate(state: CallState, field: str, cfg: BusinessConfig) -> Ga
             reason=f"gave_up:{field}:{misses}",
             say=(
                 "Apologize that you couldn't catch it, and invite them to call back when it's "
-                "convenient. Then say a short goodbye."
+                "convenient."
             ),
             next_step="end_call",
         )
