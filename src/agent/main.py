@@ -53,14 +53,19 @@ METRICS_DIR = Path(os.getenv("METRICS_DIR", REPO_ROOT / "metrics"))
 # values can cause looping); set a low value only for models where that's safe.
 LLM_TEMPERATURE = os.getenv("LLM_TEMPERATURE")
 # Call-center ambience under Riley's voice, like Retell's ambient sound. AMBIENT_SOUND=off
-# disables it. The two clips ship with livekit-agents and are mastered very differently: office
-# at volume 1.0 sits ~31 dB under speech, crowded at 0.1 sits ~20 dB under (measured 2026-10-21).
+# disables it. The clips ship with livekit-agents and are mastered very differently, so the
+# volumes are gains measured against Andromeda's speech (2026-10-21): office at 1.0 sits ~31 dB
+# under speech, so Dev's pick of 2.5 (~20 dB under) is above the documented 0.0-1.0 range. That
+# works because the player multiplies samples and clips them to 16-bit.
 AMBIENT_CLIPS = {
     "office": BuiltinAudioClip.OFFICE_AMBIENCE,
     "crowded": BuiltinAudioClip.CROWDED_ROOM,
 }
 AMBIENT_SOUND = os.getenv("AMBIENT_SOUND", "office")
-AMBIENT_VOLUME = float(os.getenv("AMBIENT_VOLUME", "1.0"))
+AMBIENT_VOLUME = float(os.getenv("AMBIENT_VOLUME", "2.5"))
+# Keyboard typing while Riley is "thinking" (between the caller's turn and her reply). The clips
+# are ~6 dB under speech at 1.0, so 0.35 puts them ~15 dB under. 0 disables typing.
+THINKING_VOLUME = float(os.getenv("THINKING_VOLUME", "0.35"))
 SILENCE_SECONDS = 7.0  # caller silent this long -> "Are you still there?" (CLAUDE.md section 4)
 SILENCE_PROMPTS = 2  # unanswered check-ins before a polite close
 
@@ -191,18 +196,26 @@ async def entrypoint(ctx: JobContext) -> None:
     )
     limit_task = asyncio.create_task(time_limit())
 
+    # --- Background audio: call-center ambience and keyboard typing -----------------------
+    # Plays on its own track, to the caller only. Riley's STT hears the caller's microphone, not
+    # this track. (Console mode doesn't support it; the player logs that and stays quiet.)
+    ambient = None
     if AMBIENT_SOUND in AMBIENT_CLIPS:
-        # Plays on its own track, to the caller only. Riley's STT hears the caller's microphone,
-        # not this track. (Console mode doesn't support it; the player logs that and stays quiet.)
-        ambience = BackgroundAudioPlayer(
-            ambient_sound=AudioConfig(
-                AMBIENT_CLIPS[AMBIENT_SOUND], volume=AMBIENT_VOLUME, fade_in=1.0
-            ),
-        )
-        await ambience.start(room=ctx.room, agent_session=session)
-        ctx.add_shutdown_callback(ambience.aclose)
+        ambient = AudioConfig(AMBIENT_CLIPS[AMBIENT_SOUND], volume=AMBIENT_VOLUME, fade_in=1.0)
     elif AMBIENT_SOUND != "off":
         logger.warning("unknown AMBIENT_SOUND %r; ambience is off", AMBIENT_SOUND)
+    thinking = None
+    if THINKING_VOLUME > 0:
+        # Probabilities sum to 0.8, so about 1 in 5 pauses has no typing; that keeps it from
+        # sounding canned.
+        thinking = [
+            AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING, volume=THINKING_VOLUME, probability=0.5),
+            AudioConfig(BuiltinAudioClip.KEYBOARD_TYPING2, volume=THINKING_VOLUME, probability=0.3),
+        ]
+    if ambient or thinking:
+        background = BackgroundAudioPlayer(ambient_sound=ambient, thinking_sound=thinking)
+        await background.start(room=ctx.room, agent_session=session)
+        ctx.add_shutdown_callback(background.aclose)
 
 
 if __name__ == "__main__":

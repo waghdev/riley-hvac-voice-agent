@@ -55,3 +55,9 @@ TODO: prerequisites, `.env`, `uv sync`, run locally, connect a phone number.
 ## Built by
 
 Devendra (Dev) Wagh, Co-Founder & CTO at Scaile AI. Built with Claude Code.
+
+## Credits
+
+- Keyboard typing sounds (Riley's "thinking" sound): "keyboard typing" by Anton,
+  https://freesound.org/s/137/, licensed CC BY 4.0. Bundled with LiveKit Agents.
+- Office ambience: bundled with LiveKit Agents.
