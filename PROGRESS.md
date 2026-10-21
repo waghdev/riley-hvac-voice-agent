@@ -64,16 +64,16 @@ PC's mic and speakers in the terminal (no WebRTC, so its latency isn't the web n
 
 | Check | Target | Latest result | Date |
 | --- | --- | --- | --- |
-| Web response latency p50 / p90 | ≤ 900 / 1,400 ms | **1,308 / 2,652 ms** from the deployed agent (LiveKit Cloud us-east, Dev calling from India, 1 call, 5 turns). LLM first token (735 ms) now dominates; the p90 turn is the 2.5 s digit wait. Was 2,784 / 5,115 with the agent on Dev's PC. Not met yet | 2026-10-21 |
+| Web response latency p50 / p90 | ≤ 900 / 1,400 ms | **1,260 / 2,564 ms** from the deployed agent (us-east, Dev calling from India, 2 calls, 14 turns). Normal turns are at target (757–1,260 ms, most under 1 s); 5 of 14 turns waited the turn detector's full 2.5 s `max_delay` after short answers. Was 2,784 / 5,115 with the agent on Dev's PC. Not met yet | 2026-10-21 |
 | Phone response latency p50 / p90 | ≤ 1,200 / 1,800 ms | | |
-| Greeting start after connect | ≤ 1,000 ms web | 1,361 ms from the deployed agent with live TTS (was 2.3–2.6 s local). Now pre-rendered (no TTS); re-measure on the next call | 2026-10-21 |
+| Greeting start after connect | ≤ 1,000 ms web | 1,361 ms (live TTS) and 1,920 ms (pre-rendered clip), from session start. Joining the room and linking the caller took 1.3 s of the second; TTS was never the bottleneck. Measure "caller connects → first audio" from the web page in M4. Not met | 2026-10-21 |
 | Barge-in stop time | ≤ 300 ms | | |
 | Backchannels ignored | yes | | |
 | Numbers, ZIPs, times spoken correctly | yes | | |
 | Silence handling and clean end-call | yes | Text mode: check-ins, close and end_call work; unit and behavior tests green. Audio not yet checked | 2026-10-20 |
 | Scenario suite pass rate | 100% | | |
 | QA grader: critical findings | 0 | | |
-| Dev's listening check vs Retell standard | pass | Dev: Agent Console call "fine". Voice: Andromeda | 2026-10-21 |
+| Dev's listening check vs Retell standard | pass | Dev, second cloud call: "looks good" (one-voice greeting, louder ambience and typing). Voice: Andromeda | 2026-10-21 |
 
 ## Quota and cost log
 
@@ -87,6 +87,7 @@ Gemini rate-limit hits). Target: $0.
 | 2026-10-20 | Turn detector (`inference.TurnDetector`): 7,500 requests/month when self-hosted; requests from agents deployed to LiveKit Cloud don't count. At the cap it falls back to the local `v1-mini` model. Adaptive interruptions: 40,000 requests/month self-hosted, then falls back to VAD-based detection. |
 | 2026-10-20 | **Gemini free tier is too slow for voice.** Dev's key (project on Free), from Dev's machine (plain round trip to Google 0.2–0.5 s), ~16:30–17:00 UTC, 4 runs each: `gemini-3.5-flash-lite` streaming time to first token median **16.3 s** (11–28 s); Priority via the Interactions API median 17.7 s; `serviceTier: priority` on generateContent median 13.7 s, but the response header said `standard` (silently downgraded). `gemini-3.8-flash`: three of four 503 "high demand" or timeout, one success at 60 s. Target total response is ≤ 0.9 s p50. Rule 8: Dev decides the LLM. |
 | 2026-10-20 | LiveKit Inference LLM benchmark (6 models × 8 calls, then 4 × 24): about 300 tiny requests, well under $0.05 of the $2.50 credit. Time to first token is ~1 s from India (gateway round trip 0.2–0.3 s); gpt-4.1-nano was best (0.76 s reply p50). Table in docs/decisions.md. |
+| 2026-10-21 | **Second cloud call** (new version): 9 turns. Normal turns 757–1,260 ms total; three turns sat at exactly 2,501–2,507 ms end-of-utterance (the `max_delay` cap). TTS first audio down to ~50 ms on a warm connection; LLM 402–665 ms. Clean exit: no "did not exit in time", no warnings. Greeting start 1,920 ms, 1.3 s of it joining the room. |
 | 2026-10-21 | **First cloud call** (us-east): total p50 1,308 ms, p90 2,652; end of utterance 387 ms; STT 234 ms; LLM 735 ms; TTS 136 ms; greeting start 1,361 ms. Logs: one hosted turn-detector timeout (fell back to the local mini model); the job hung 10 s at exit and was killed (fixed: background audio now closes before the room is deleted; verify on the next call). |
 | 2026-10-21 | **Latency diagnosis.** Dev's Agent Console calls (web, agent local in India): total p50 2.8 s, p90 5.1 s; end of utterance p50 2.5 s; STT final 1.3–3.8 s; LLM 0.84 s; TTS 0.38 s. Clean speech through the local audio pipeline (debugger `--audio`): end of turn ~0.5 s, LLM 0.8–1.2 s, TTS 0.36–0.56 s, total ~1.9–2.1 s. After a spoken ZIP the turn detector's end-of-turn probability was 0.28 (threshold 0.36), so it waited the full 2.5 s `max_delay` (total 3.2 s); Dev's 2,505 ms turn matches. Dev's 3.8 s turns waited on Deepgram's final transcript, which clean audio doesn't reproduce. Each stage includes India↔US round trips, so the web number has to come from the deployed agent. |
 | 2026-10-21 | Debugger audio mode: 5 spoken lines through LiveKit Inference TTS (a few hundred characters of the credit). |
