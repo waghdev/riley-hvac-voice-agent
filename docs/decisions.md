@@ -2,6 +2,26 @@
 
 One entry per decision: date, decision, alternatives considered, reason. Newest at the top.
 
+## 2026-10-21: M2 structure: one agent with tools, gates in pure Python (approved by Dev)
+
+- **Decision:** a single `Riley` agent with a small set of tools. Each tool validates its input,
+  writes `CallState`, runs the relevant gates in `gates.py` and returns the `GateResult` to the LLM.
+  Booking refuses in code unless the readiness gate passed. Safety is checked on every tool call,
+  and a dedicated tool reports a hazard the moment the caller mentions one.
+- **Why:** LiveKit's workflow guide says to start with one agent and a small set of tools, and to
+  split only on a concrete limitation (prompt bloat, conflicting tool access, multi-turn collection
+  needing its own loop, backtracking). Riley has about six tools, no conflicting permissions, and a
+  correction is just the same tool called again. It's also the lowest-latency option.
+- **Alternatives:** supervisor with tasks (more structure, some latency per task); a task group for
+  intake (built-in backtracking, but rigid when callers give details out of order). Revisit only if
+  measurements show one of the limitations above.
+- **Schema:** `CallState` (call id, first name, 10-digit callback number, 5-digit ZIP, category,
+  symptoms, not-working flag, indoor temperature, vulnerable occupant, safety signals, failed
+  attempts per field, outcome); `GateResult(decision, reason, say, next_step)`. Two additions to
+  CLAUDE.md's gate table: readiness returns `NOT_BOOKABLE` (not just `MISSING`) when the caller is
+  out of area, the service isn't offered or a safety signal exists; and a retry rule turns a second
+  failed attempt at the same detail into `callback_requested` (section 4).
+
 ## 2026-10-21: Short-answer endpointing gets fixed in M2, with context (Dev's decision)
 
 - **Measured:** on the deployed agent, normal turns totalled 757–1,260 ms, but 5 of 14 turns sat at
