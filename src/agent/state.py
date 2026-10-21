@@ -34,6 +34,10 @@ class CallState:
     failed_attempts: dict[str, int] = field(default_factory=dict)  # field -> misses so far
     callback_reason: str | None = None
     outcome: Outcome | None = None
-    # Conversation control, not a business fact: the detail Riley just asked for, so main.py can
-    # shorten endpointing for short answers (a name, a number, a ZIP).
+    # Conversation control, not business facts. `expecting`: the detail Riley just asked for, so
+    # endpointing can be shortened for short answers (a name, a number, a ZIP). `acknowledged`:
+    # whether this caller turn already got a spoken "Got it." (main.py resets it each turn);
+    # `acks_said` rotates the wording.
     expecting: str | None = None
+    acknowledged: bool = False
+    acks_said: int = 0

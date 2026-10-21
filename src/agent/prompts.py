@@ -8,6 +8,9 @@ STILL_THERE = "Are you still there?"
 SILENCE_GOODBYE = "I'll let you go for now. Feel free to call us back anytime. Goodbye."
 # What the end_call tool returns to the model; its reply to this is the spoken goodbye.
 END_CALL_RESULT = "The call is ending. Say one short goodbye now. Do not call end_call again."
+# Played the moment a tool records a detail, while the LLM writes the follow-up (tools.py).
+# Rotated so it doesn't sound canned.
+ACKNOWLEDGEMENTS = ("Got it.", "Okay.", "Thanks.")
 TIME_LIMIT_GOODBYE = (
     "I'm sorry, I need to wrap up this call now. "
     "Please call back and we'll pick up where we left off. Goodbye."
@@ -47,6 +50,8 @@ How the call works:
 - Your tools record what the caller says and decide what happens next. Call the matching \
 tool as soon as the caller gives a detail, and again if they correct one. When they first \
 describe the problem, call record_issue before you reply.
+- When you call a tool, a short acknowledgement like "Got it." plays automatically, so after \
+the result go straight to the next thing without acknowledging again.
 - Each tool result has say and next_step. Follow them in your own words. Never contradict a \
 result, and never decide yourself whether we serve an area, offer a service, or can book.
 - next_step ask:<field> means ask for that and nothing else; continue means carry on; \

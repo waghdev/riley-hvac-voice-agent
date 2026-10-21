@@ -13,7 +13,7 @@ from typing import Any, Literal
 from livekit.agents import RunContext, function_tool
 from livekit.agents.llm import ToolError, Toolset
 
-from agent import intake
+from agent import intake, prompts
 from agent.config import load_config
 from agent.gates import GateResult
 from agent.state import CallState
@@ -43,6 +43,23 @@ def _formatted_number(digits: str) -> str:
     return f"{digits[:3]}-{digits[3:6]}-{digits[6:]}"
 
 
+def _acknowledge(context: RunContext[CallState]) -> str | None:
+    """Say "Got it." now, once per caller turn, while the LLM writes the follow-up.
+
+    A tool turn needs two LLM round trips (one to call the tool, one to reply) before any audio,
+    and the model won't put text before its tool call. LiveKit's documented hold-message pattern:
+    say() inside the tool, not awaited, plays while the rest of the turn is generated.
+    """
+    state = context.userdata
+    if state.acknowledged:
+        return None
+    state.acknowledged = True
+    line = prompts.ACKNOWLEDGEMENTS[state.acks_said % len(prompts.ACKNOWLEDGEMENTS)]
+    state.acks_said += 1
+    context.session.say(line)
+    return line
+
+
 def _respond(context: RunContext[CallState], result: GateResult) -> dict[str, Any] | None:
     state, session = context.userdata, context.session
     if result.next_step == "say_exact_then_end_call":
@@ -51,8 +68,12 @@ def _respond(context: RunContext[CallState], result: GateResult) -> dict[str, An
         handle = session.say(CONFIG.safety_script, allow_interruptions=False)
         handle.add_done_callback(lambda _: session.shutdown())
         return None
+    said = _acknowledge(context)
     session.update_options(endpointing_opts=endpointing_for(state))
     out: dict[str, Any] = result.to_tool_output()
+    if said:
+        # Right next to the reply being written, so the model doesn't open with another "Thanks."
+        out["you_just_said"] = f"{said} (already spoken; don't acknowledge again)"
     if result.next_step == "end_call":
         # A gate ended the call, so code hangs up, not the LLM: once Riley's reply to this result
         # has played, the session closes. Leaving it to end_call gave two goodbyes, or none and

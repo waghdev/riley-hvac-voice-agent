@@ -42,7 +42,7 @@ from agent.config import DEFAULT_TTS_VOICE, REPO_ROOT, load_business
 from agent.greeting_audio import GreetingClip, load_greeting
 from agent.metrics import JsonlWriter, TurnPairer
 from agent.silence import SilenceMonitor
-from agent.spoken import NameGuard, speak_numbers_stream
+from agent.spoken import LeadingAckGuard, NameGuard, speak_numbers_stream
 from agent.state import CallState, Outcome
 
 load_dotenv(REPO_ROOT / ".env")
@@ -164,11 +164,14 @@ async def entrypoint(ctx: JobContext) -> None:
         ),
         user_away_timeout=SILENCE_SECONDS,
         userdata=state,
-        # What TTS hears: LiveKit's markdown and emoji filters (the defaults, kept), the caller's
-        # name at most once per call, then numbers spoken the way people say them.
+        # What TTS hears: LiveKit's markdown and emoji filters (the defaults, kept); no second
+        # acknowledgement after tools.py's spoken "Got it." (first, so a dropped "Thanks,
+        # Jordan." doesn't use up the name); the caller's name at most once per call; then
+        # numbers spoken the way people say them. The transcript keeps the model's words.
         tts_text_transforms=[
             "filter_markdown",
             "filter_emoji",
+            LeadingAckGuard(lambda: state.acknowledged),
             NameGuard(lambda: state.first_name),
             speak_numbers_stream,
         ],
@@ -212,6 +215,7 @@ async def entrypoint(ctx: JobContext) -> None:
             # Riley's next question also has a short answer.
             state.expecting = None
             session.update_options(endpointing_opts=tools.endpointing_for(state))
+            state.acknowledged = False  # this new turn may get its own "Got it."
         record = pairer.add(ev.item.role, ev.item.metrics or {})
         if record:
             writer.write(record)

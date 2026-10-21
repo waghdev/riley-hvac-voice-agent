@@ -244,3 +244,67 @@ def _holdback(buffer: str, name: str) -> int:
         if any(p.startswith(low[-n:]) for p in patterns):
             return n
     return 0
+
+
+# --- No second acknowledgement --------------------------------------------------------------
+
+_ACK_WORDS = (
+    r"(?:thanks|thank you|got it|okay|ok|alright|all right|great|perfect|sounds good|understood)"
+)
+# A complete opening acknowledgement: "Thanks.", "Thanks, Jordan.", "Okay," "Perfect!"
+_LEADING_ACK = re.compile(rf"^\s*{_ACK_WORDS}(?:\s+so\s+much)?(?:,\s*[A-Za-z]+)?[.!,]\s*", re.I)
+# Text that could still grow into one: "Tha", "Thanks", "Thanks, Jor"
+_PARTIAL_ACK = re.compile(rf"^\s*{_ACK_WORDS}(?:\s+so(?:\s+much)?)?(?:,\s*[A-Za-z]*)?$", re.I)
+_ACK_PHRASES = ("thanks", "thank you", "got it", "okay", "ok", "alright", "all right", "great",
+                "perfect", "sounds good", "understood")  # fmt: skip
+
+
+class LeadingAckGuard:
+    """A tts_text_transforms entry: once Riley has said "Got it." this turn (tools.py plays it
+    while the LLM writes the reply), drop an acknowledgement the reply opens with.
+
+    Bug (debugger calls): "Thanks." then "Thanks. What's the ZIP code?" in 2 of 2 runs, despite
+    the prompt and a tool-result field. The spoken acknowledgement itself is a bare fixed line,
+    so it passes untouched. Only the start of each reply is examined.
+    """
+
+    def __init__(self, acknowledged: Callable[[], bool]) -> None:
+        self._acknowledged = acknowledged
+
+    def __call__(self, text: AsyncIterable[str]) -> AsyncIterator[str]:
+        return self._run(text)
+
+    async def _run(self, text: AsyncIterable[str]) -> AsyncIterator[str]:
+        head: str | None = ""  # None once the opening has been decided
+        async for chunk in text:
+            if head is None:
+                yield chunk
+                continue
+            head += chunk
+            decided = self._decide(head, final=False)
+            if decided is not None:
+                head = None
+                if decided:
+                    yield decided
+        if head:
+            yield self._decide(head, final=True) or ""
+
+    def _decide(self, head: str, *, final: bool) -> str | None:
+        """The text to send for this opening, or None if it's too early to tell."""
+        m = _LEADING_ACK.match(head)
+        if m and head[m.end() :].strip():
+            # An acknowledgement followed by more of the reply.
+            if not self._acknowledged():
+                return head
+            rest = head[m.end() :]
+            return rest[:1].upper() + rest[1:]
+        if final:
+            return head  # a bare line (Riley's own "Got it.") or something short: keep it
+        if m or _PARTIAL_ACK.match(head) or self._is_word_prefix(head):
+            return None  # could still be "Thanks. What's..." or the bare acknowledgement
+        return head
+
+    @staticmethod
+    def _is_word_prefix(head: str) -> bool:
+        start = head.lstrip().lower()
+        return bool(start) and any(p.startswith(start) for p in _ACK_PHRASES)
