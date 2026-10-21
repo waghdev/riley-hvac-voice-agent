@@ -78,6 +78,13 @@ class TurnPairer:
             **_to_ms(self._pending_user, USER_FIELDS),
             **_to_ms(report, ASSISTANT_FIELDS),
         }
+        if record["e2e_ms"] is None:
+            # A spoken acknowledgement from session.say() has speaking timestamps but no
+            # e2e_latency. Total response is still "caller stops -> first agent audio".
+            stopped = self._pending_user.get("stopped_speaking_at")
+            started = report.get("started_speaking_at")
+            if stopped is not None and started is not None:
+                record["e2e_ms"] = round((started - stopped) * 1000, 1)
         self._pending_user = None
         return record
 

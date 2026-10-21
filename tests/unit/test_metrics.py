@@ -80,3 +80,20 @@ def test_writer_appends_one_json_line_per_record(tmp_path):
     writer.write({"kind": "turn", "e2e_ms": 790.5})
     lines = writer.path.read_text(encoding="utf-8").splitlines()
     assert [json.loads(line)["e2e_ms"] for line in lines] == [812.0, 790.5]
+
+
+def test_first_audio_falls_back_to_speaking_timestamps(pairer):
+    # A spoken acknowledgement ("Got it.") comes from session.say(), whose message carries
+    # speaking timestamps but no e2e_latency. Total response is still "caller stops -> first
+    # agent audio" (CLAUDE.md section 8), so it's computed from the timestamps.
+    pairer.add("assistant", {})
+    pairer.add("user", {"stopped_speaking_at": START + 10.0, "end_of_turn_delay": 0.3})
+    record = pairer.add("assistant", {"started_speaking_at": START + 10.85})
+    assert record["e2e_ms"] == 850.0
+
+
+def test_sdk_e2e_wins_when_present(pairer):
+    pairer.add("assistant", {})
+    pairer.add("user", {"stopped_speaking_at": START + 10.0})
+    record = pairer.add("assistant", {"e2e_latency": 0.9, "started_speaking_at": START + 11.5})
+    assert record["e2e_ms"] == 900.0
