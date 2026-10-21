@@ -4,8 +4,8 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
 
 ## Current state
 
-- **Milestone:** M1 Talking agent, in progress. The agent is built and checked in text mode; it
-  needs Dev's voice session (below) for the voice choice, live latency and barge-in checks.
+- **Milestone:** M1 done (2026-10-21), with the latency gap recorded and Dev's decision to fix it in
+  M2. Next: M2 Decision layer.
 - **Location:** `C:\Users\Devendra\Projects\Riley - HVAC`. Repo: https://github.com/waghdev/voice-agent-reference
   (private until M7). LiveKit project: `riley-kestrel-comfort-heating-a` (Build).
 - **Stack as built:** Deepgram `nova-3` STT + Aura-2 TTS (Dev's key), LLM
@@ -13,26 +13,30 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
   bundled Silero VAD, ai-coustics `QUAIL_L`.
 - **Deployed:** `riley` runs on LiveKit Cloud in `us-east` (Build plan), so latency can be measured
   the way visitors will get it. Office ambience and keyboard typing are on.
-- **Next step:** Dev makes another cloud call to check the one-voice greeting, the louder
-  background audio and the clean hang-up. Then latency tuning: LLM first token (735 ms) is the
-  largest stage, and turns after spoken digits wait the full 2.5 s.
-- **Blockers:** M1 can't close without that session (listening and live audio).
+- **Next step:** M2. First, check the current LiveKit pattern for tools/tasks and record the agent
+  structure; then `state.py` and `gates.py` with table-driven tests, tools, text normalization,
+  the name-repetition guard, and context-aware endpointing (shorter `max_delay` while Riley
+  collects a name, number or ZIP).
+- **Blockers:** none.
 
-## M1 voice session (Dev, about 10 minutes)
+## M1 quality-bar gaps carried into M2 and later (Dev decided, 2026-10-21)
 
-1. Restart VS Code (so its terminals see `uv` and `lk`, which were installed during the session).
-2. ~~Pick a voice~~ Done 2026-10-21: Dev chose Aura-2 Andromeda (`TTS_VOICE` in `.env`).
-3. In a VS Code terminal: `uv run python -m agent.main dev` (leave it running).
-4. Open https://cloud.livekit.io, pick the project, go to Agents, and use **Launch Console** for
-   `riley`. Allow the microphone.
-5. Try: a normal intake call; pause mid-sentence ("my AC is... um... making a clicking noise");
-   say "mm-hmm" while Riley talks (it should keep going); cut in with "wait, actually" (it should
-   stop fast); stay silent for about 20 s (two check-ins, then goodbye); and end with "that's all,
-   bye".
-6. Tell Claude which voice and how it felt. Claude reads `metrics/` and writes the numbers here.
+- **Short answers wait 2.5 s** (5 of 14 cloud turns): the turn detector isn't confident after a
+  name or digits, so it waits its full `max_delay`. Fix in M2: while Riley is collecting a name,
+  number or ZIP (known from `CallState`), lower `max_delay` to about 1 s; keep 2.5 s for open
+  answers so mid-sentence pauses aren't cut off. Normal turns are already at target.
+- **Greeting start 1.4–1.9 s** (target 1 s): mostly the agent joining the room. Measure "caller
+  connects → first audio" from the web page in M4, then decide.
+- **Name repetition** ("Thanks, Jordan" every turn): code fix in M2 once the name is in `CallState`.
 
-Fallback if the console isn't reachable: `uv run python -m agent.main console` talks through the
-PC's mic and speakers in the terminal (no WebRTC, so its latency isn't the web number).
+## How to call Riley
+
+- Deployed agent: Agent Console, `riley` in us-east (link from `lk agent deploy`, or cloud.livekit.io
+  → Agents). Stop any local `dev` worker first, or calls may go to it.
+- Local: `uv run python -m agent.main dev`, then the Agent Console; or `... console` for mic and
+  speakers in the terminal.
+- After calls: `lk agent logs > agent.log` during the call, then `scripts/metrics_from_logs.py` and
+  `scripts/latency_report.py`.
 
 ## Account checklist
 
@@ -52,7 +56,7 @@ PC's mic and speakers in the terminal (no WebRTC, so its latency isn't the web n
 ## Milestones
 
 - [x] M0 Setup (2026-10-20)
-- [ ] M1 Talking agent (built and text-tested; waiting on Dev's voice session)
+- [x] M1 Talking agent (2026-10-21; latency gaps above carried into M2/M4)
 - [ ] M2 Decision layer
 - [ ] M3 Booking and CRM
 - [ ] M4 Web call page
@@ -131,6 +135,19 @@ Gemini rate-limit hits). Target: $0.
   scaileai.com; check Vercel Hobby terms first).
 
 ## Session log
+
+### 2026-10-21: M1 closed
+
+- Voice: Aura-2 Andromeda (Dev, by listening; American English, `en-US`).
+- Background audio: office ambience and keyboard typing while Riley thinks, levels picked by Dev
+  from measured previews, then +3 dB after a live call.
+- Deployed to LiveKit Cloud us-east (Dockerfile, minimal secrets, `metrics_from_logs.py`).
+- Bugs from cloud calls, each with a test before the fix: the greeting's disclosure sentence in a
+  different-sounding voice (now one pre-rendered clip); the job hanging 10 s at exit (background
+  audio now closes before the room is deleted); replayed log lines double-counting turns.
+- Latency: agent on Dev's PC 2.8 s p50; deployed 1.26 s p50 / 2.56 s p90 (14 turns). Normal
+  turns are at target; short answers wait the 2.5 s `max_delay`. Dev chose to fix that in M2 with
+  context-aware endpointing and close M1 with the gap recorded.
 
 ### 2026-10-20: M1 agent built and text-tested
 

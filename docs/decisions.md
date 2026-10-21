@@ -2,6 +2,19 @@
 
 One entry per decision: date, decision, alternatives considered, reason. Newest at the top.
 
+## 2026-10-21: Short-answer endpointing gets fixed in M2, with context (Dev's decision)
+
+- **Measured:** on the deployed agent, normal turns totalled 757–1,260 ms, but 5 of 14 turns sat at
+  exactly ~2.5 s of end-of-utterance delay: the audio turn detector wasn't confident after a name
+  or a digit string, so it waited its full `max_delay`.
+- **Decision:** close M1 with the gap recorded. In M2, Riley's tools and `CallState` know which
+  detail she just asked for, so `max_delay` drops to about 1 s while she's collecting a name,
+  callback number or ZIP (`session.update_options(endpointing_opts=...)`, documented for runtime
+  changes) and returns to 2.5 s for open answers.
+- **Alternatives:** lower `max_delay` on every turn (rejected: it would cut off callers who pause
+  mid-sentence, which section 4 forbids); Deepgram Flux end-of-turn detection (kept as an option if
+  the context-aware change isn't enough).
+
 ## 2026-10-21: Pre-rendered greeting, hang-up order, louder background audio
 
 - **Greeting clip:** on Dev's first cloud call, "This call may be recorded for quality." sounded like
