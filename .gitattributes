@@ -1,0 +1,2 @@
+# Binary assets: never convert line endings (the greeting clip is checked by SHA-256).
+*.wav binary

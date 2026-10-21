@@ -12,9 +12,11 @@ import asyncio
 import logging
 import os
 import time
+from collections.abc import AsyncIterator
 from pathlib import Path
 
 from dotenv import load_dotenv
+from livekit import rtc
 from livekit.agents import (
     Agent,
     AgentServer,
@@ -36,7 +38,8 @@ from livekit.agents.llm import ChatMessage
 from livekit.plugins import ai_coustics, deepgram
 
 from agent import prompts
-from agent.config import REPO_ROOT, load_business
+from agent.config import DEFAULT_TTS_VOICE, REPO_ROOT, load_business
+from agent.greeting_audio import GreetingClip, load_greeting
 from agent.metrics import JsonlWriter, TurnPairer
 from agent.silence import SilenceMonitor
 
@@ -45,7 +48,12 @@ logger = logging.getLogger("riley")
 
 BUSINESS = load_business()
 LLM_MODEL = os.getenv("LLM_MODEL", "google/gemini-3.1-flash-lite")
-TTS_VOICE = os.getenv("TTS_VOICE", "aura-2-andromeda-en")  # chosen by listening, decisions.md
+TTS_VOICE = os.getenv("TTS_VOICE", DEFAULT_TTS_VOICE)
+# Loaded once per process, so a call never waits on it. None if missing or stale (wrong text or
+# voice): Riley then speaks the greeting with live TTS instead.
+GREETING_CLIP = load_greeting(prompts.greeting(BUSINESS), TTS_VOICE)
+if GREETING_CLIP is None:
+    logger.warning("no greeting clip for this text and voice; using live TTS for the greeting")
 MAX_CALL_SECONDS = float(os.getenv("MAX_CALL_SECONDS", "300"))
 METRICS_DIR = Path(os.getenv("METRICS_DIR", REPO_ROOT / "metrics"))
 
@@ -55,17 +63,20 @@ LLM_TEMPERATURE = os.getenv("LLM_TEMPERATURE")
 # Call-center ambience under Riley's voice, like Retell's ambient sound. AMBIENT_SOUND=off
 # disables it. The clips ship with livekit-agents and are mastered very differently, so the
 # volumes are gains measured against Andromeda's speech (2026-10-21): office at 1.0 sits ~31 dB
-# under speech, so Dev's pick of 2.5 (~20 dB under) is above the documented 0.0-1.0 range. That
-# works because the player multiplies samples and clips them to 16-bit.
+# under speech. Dev picked 2.5 from previews, then asked for a little louder after a live call:
+# 3.5 (+3 dB, ~17 dB under speech, peaks at -27 dBFS). That's above the documented 0.0-1.0 range;
+# it works because the player multiplies samples and clips them to 16-bit.
 AMBIENT_CLIPS = {
     "office": BuiltinAudioClip.OFFICE_AMBIENCE,
     "crowded": BuiltinAudioClip.CROWDED_ROOM,
 }
 AMBIENT_SOUND = os.getenv("AMBIENT_SOUND", "office")
-AMBIENT_VOLUME = float(os.getenv("AMBIENT_VOLUME", "2.5"))
+AMBIENT_VOLUME = float(os.getenv("AMBIENT_VOLUME", "3.5"))
 # Keyboard typing while Riley is "thinking" (between the caller's turn and her reply). The clips
-# are ~6 dB under speech at 1.0, so 0.35 puts them ~15 dB under. 0 disables typing.
-THINKING_VOLUME = float(os.getenv("THINKING_VOLUME", "0.35"))
+# are ~6 dB under speech at 1.0; 0.5 (+3 dB on the first pick of 0.35) puts them ~12 dB under.
+# 0 disables typing.
+THINKING_VOLUME = float(os.getenv("THINKING_VOLUME", "0.5"))
+BACKGROUND_CLOSE_SECONDS = 2.0  # bound on closing the background-audio player at hang-up
 SILENCE_SECONDS = 7.0  # caller silent this long -> "Are you still there?" (CLAUDE.md section 4)
 SILENCE_PROMPTS = 2  # unanswered check-ins before a polite close
 
@@ -80,14 +91,25 @@ def build_llm() -> inference.LLM:
     return inference.LLM(model=LLM_MODEL, extra_kwargs=extra)
 
 
+async def clip_frames(clip: GreetingClip, frame_ms: int = 20) -> AsyncIterator[rtc.AudioFrame]:
+    """The pre-rendered greeting as 20 ms audio frames, which is what say(audio=...) plays."""
+    samples = clip.sample_rate * frame_ms // 1000
+    step = samples * 2  # 16-bit mono: 2 bytes per sample
+    for start in range(0, len(clip.pcm), step):
+        chunk = clip.pcm[start : start + step].ljust(step, b"\x00")  # pad the last frame
+        yield rtc.AudioFrame(
+            data=chunk, sample_rate=clip.sample_rate, num_channels=1, samples_per_channel=samples
+        )
+
+
 class Riley(Agent):
     def __init__(self) -> None:
         super().__init__(
             instructions=prompts.build_instructions(BUSINESS),
             tools=[
                 # ignore_on_enter: the model can't end the call during the greeting.
-                # delete_room=False: RoomOptions.delete_room_on_close already deletes the room
-                # for every way a call ends, so this tool doesn't need to.
+                # delete_room=False: the session's close handler deletes the room for every way
+                # a call ends, after closing background audio (see finish_call below).
                 # end_instructions is the tool's result. The default ("say goodbye to the
                 # user") let the model loop on end_call instead of speaking (behavior test,
                 # 2026-10-20), so it says exactly what to do next.
@@ -101,7 +123,14 @@ class Riley(Agent):
 
     async def on_enter(self) -> None:
         # The greeting carries the recording disclosure, so the caller can't talk over it.
-        self.session.say(prompts.greeting(BUSINESS), allow_interruptions=False)
+        # It plays from one pre-rendered clip: live TTS renders each sentence separately, and
+        # Aura-2 read the disclosure sentence in a different-sounding voice (cloud call,
+        # 2026-10-21). The text still goes to the transcript and chat history.
+        text = prompts.greeting(BUSINESS)
+        if GREETING_CLIP is not None:
+            self.session.say(text, audio=clip_frames(GREETING_CLIP), allow_interruptions=False)
+        else:
+            self.session.say(text, allow_interruptions=False)
 
 
 server = AgentServer()
@@ -129,7 +158,7 @@ async def entrypoint(ctx: JobContext) -> None:
     writer = JsonlWriter(METRICS_DIR)
 
     async def end_with(line: str) -> None:
-        """Say a final line nobody can talk over, then close (which deletes the room)."""
+        """Say a final line nobody can talk over, then close the session (see finish_call)."""
         session.interrupt()
         await session.say(line, allow_interruptions=False)
         session.shutdown()
@@ -170,14 +199,36 @@ async def entrypoint(ctx: JobContext) -> None:
         await end_with(prompts.TIME_LIMIT_GOODBYE)
 
     limit_task: asyncio.Task[None] | None = None
+    background: BackgroundAudioPlayer | None = None
+    finishing: asyncio.Task[None] | None = None
+
+    async def finish_call(reason: str) -> None:
+        """Hang up in an order that lets the job exit cleanly.
+
+        The SDK disconnects the room *before* it runs shutdown callbacks, so closing background
+        audio as a shutdown callback tried to unpublish its track from a disconnected room
+        ("could not find publication to remove"), and the job hung for 10 s until LiveKit killed
+        it (cloud call, 2026-10-21). So: close background audio while the room is still connected
+        (bounded, so a stuck close can't leave the caller on a silent line), then delete the room,
+        which disconnects the caller (phone included), then end the job.
+        """
+        if background is not None:
+            try:
+                await asyncio.wait_for(background.aclose(), timeout=BACKGROUND_CLOSE_SECONDS)
+            except Exception:  # TimeoutError included: still hang up
+                logger.warning("background audio didn't close cleanly", exc_info=True)
+        await ctx.delete_room()  # a no-op with a warning in console mode
+        ctx.shutdown(reason=reason)
 
     @session.on("close")
     def _on_close(ev: CloseEvent) -> None:
+        # Every way a call ends (end_call tool, silence, time limit, caller hanging up) closes
+        # the session, so this is the one place a call is finished.
+        nonlocal finishing
         silence.stop()
         if limit_task is not None:
             limit_task.cancel()
-        # Ends the job in console mode too, where there's no room to delete.
-        ctx.shutdown(reason=f"session closed: {ev.reason}")
+        finishing = asyncio.create_task(finish_call(f"session closed: {ev.reason}"))
 
     await session.start(
         agent=Riley(),
@@ -189,9 +240,9 @@ async def entrypoint(ctx: JobContext) -> None:
                     model=ai_coustics.EnhancerModel.QUAIL_L
                 ),
             ),
-            # Every way a call ends (end_call tool, silence, time limit, caller hanging up)
-            # closes the session; deleting the room then disconnects everyone, phone included.
-            delete_room_on_close=True,
+            # The room is deleted by finish_call instead, after background audio is closed;
+            # deleting it here at the same moment raced that cleanup.
+            delete_room_on_close=False,
         ),
     )
     limit_task = asyncio.create_task(time_limit())
@@ -215,7 +266,7 @@ async def entrypoint(ctx: JobContext) -> None:
     if ambient or thinking:
         background = BackgroundAudioPlayer(ambient_sound=ambient, thinking_sound=thinking)
         await background.start(room=ctx.room, agent_session=session)
-        ctx.add_shutdown_callback(background.aclose)
+        # Closed by finish_call, not a shutdown callback (see its docstring).
 
 
 if __name__ == "__main__":
