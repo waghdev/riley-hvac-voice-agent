@@ -2,6 +2,43 @@
 
 One entry per decision: date, decision, alternatives considered, reason. Newest at the top.
 
+## 2026-10-21: Deploy to LiveKit Cloud us-east now, to measure the real web latency (Dev approved)
+
+- **Decision:** the agent runs on LiveKit Cloud (Build plan) in `us-east`, ahead of M4, so latency
+  is measured in the setup visitors will use. It's built from the repo's `Dockerfile`.
+- **Why:** with the agent on Dev's PC in India, every STT, LLM and TTS request crosses India↔US,
+  which put a ~2 s floor under every turn. Tuning against that would optimize the wrong thing.
+- **Region:** `us-east`, close to Deepgram and the LLM gateway; it can't be changed after creation
+  (a new deployment is needed). Callers in India reach it through LiveKit's media network.
+- **Secrets:** only `DEEPGRAM_API_KEY`, `LLM_MODEL`, `TTS_VOICE` and `MAX_CALL_SECONDS`, uploaded from a
+  temporary file that was deleted afterwards. LiveKit injects its own credentials; the Google key
+  stays local because the deployed agent doesn't use it.
+- **Image:** LiveKit's uv template, adapted: Python 3.13, dependencies installed before the source
+  (cached), project installed editable so `config/business.yaml` resolves, no dev tools, and the
+  venv's python as the entrypoint so a cold start never re-syncs dependencies.
+- **Metrics:** the cloud disk isn't kept, so `scripts/metrics_from_logs.py` rebuilds metrics JSONL
+  from the "turn metrics" log lines (`lk agent logs`).
+- **Cost:** $0. Build includes agent hosting; sessions use the 1,000 monthly agent minutes. Idle
+  agents scale to zero, so the first call after a quiet spell can wait 10–20 s.
+- **`livekit.toml`** (project subdomain and agent id) is gitignored: not secret, but it ties the
+  public repo to Dev's project.
+
+## 2026-10-21: Background audio: office ambience at 2.5, keyboard typing at 0.35 (Dev's choice)
+
+- **Decision:** `BackgroundAudioPlayer` with LiveKit's built-in office ambience at gain 2.5, and
+  keyboard typing as the "thinking" sound at 0.35, chosen with probabilities 0.5 and 0.3 (so about
+  1 in 5 pauses has no typing).
+- **How the levels were picked:** measured loudness against Andromeda's speech, then Dev listened to
+  mixed previews (`voice-samples/ambience/`). Office at 1.0 sat ~31 dB under speech, too quiet;
+  2.5 puts it ~20 dB under. Typing at 1.0 sat only ~6 dB under; 0.35 puts it ~15 dB under.
+- **Note:** 2.5 is above the documented 0.0–1.0 range. It works because the player multiplies
+  samples and clips them to 16-bit; if a future SDK caps volume at 1.0, the ambience gets quieter,
+  not broken.
+- **Licensing:** the typing clips are CC BY 4.0 (credited in the README); office ambience ships with
+  LiveKit Agents. Nothing is redistributed by this repo.
+- **Audio path:** the ambience plays on a separate track to the caller; Riley's STT listens to the
+  caller's microphone, so it never transcribes the ambience.
+
 ## 2026-10-21: Voice is Deepgram Aura-2 Andromeda (chosen by Dev, by listening)
 
 - **Decision:** `TTS_VOICE=aura-2-andromeda-en`.

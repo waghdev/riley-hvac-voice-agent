@@ -11,8 +11,11 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
 - **Stack as built:** Deepgram `nova-3` STT + Aura-2 TTS (Dev's key), LLM
   `google/gemini-3.1-flash-lite` on LiveKit Inference (free Build credit), `inference.TurnDetector()`,
   bundled Silero VAD, ai-coustics `QUAIL_L`.
-- **Next step:** Dev talks to Riley in the Agent Console (steps in "M1 voice session" below; the
-  voice is chosen: Andromeda). Claude then runs the latency report, tunes, and closes M1.
+- **Deployed:** `riley` runs on LiveKit Cloud in `us-east` (Build plan), so latency can be measured
+  the way visitors will get it. Office ambience and keyboard typing are on.
+- **Next step:** Dev calls the deployed agent from the Agent Console (stop any local `dev` worker
+  first, or calls may go to it). Claude turns the cloud logs into the latency table, tunes, and
+  closes M1 or reports the gap (rule 8).
 - **Blockers:** M1 can't close without that session (listening and live audio).
 
 ## M1 voice session (Dev, about 10 minutes)
