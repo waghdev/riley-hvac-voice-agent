@@ -19,6 +19,9 @@ from livekit.agents import (
     Agent,
     AgentServer,
     AgentSession,
+    AudioConfig,
+    BackgroundAudioPlayer,
+    BuiltinAudioClip,
     CloseEvent,
     ConversationItemAddedEvent,
     JobContext,
@@ -49,6 +52,15 @@ METRICS_DIR = Path(os.getenv("METRICS_DIR", REPO_ROOT / "metrics"))
 # Unset = the model's default. Gemini 3 models should keep theirs (LiveKit's Gemini docs: other
 # values can cause looping); set a low value only for models where that's safe.
 LLM_TEMPERATURE = os.getenv("LLM_TEMPERATURE")
+# Call-center ambience under Riley's voice, like Retell's ambient sound. AMBIENT_SOUND=off
+# disables it. The two clips ship with livekit-agents and are mastered very differently: office
+# at volume 1.0 sits ~31 dB under speech, crowded at 0.1 sits ~20 dB under (measured 2026-10-21).
+AMBIENT_CLIPS = {
+    "office": BuiltinAudioClip.OFFICE_AMBIENCE,
+    "crowded": BuiltinAudioClip.CROWDED_ROOM,
+}
+AMBIENT_SOUND = os.getenv("AMBIENT_SOUND", "office")
+AMBIENT_VOLUME = float(os.getenv("AMBIENT_VOLUME", "1.0"))
 SILENCE_SECONDS = 7.0  # caller silent this long -> "Are you still there?" (CLAUDE.md section 4)
 SILENCE_PROMPTS = 2  # unanswered check-ins before a polite close
 
@@ -178,6 +190,19 @@ async def entrypoint(ctx: JobContext) -> None:
         ),
     )
     limit_task = asyncio.create_task(time_limit())
+
+    if AMBIENT_SOUND in AMBIENT_CLIPS:
+        # Plays on its own track, to the caller only. Riley's STT hears the caller's microphone,
+        # not this track. (Console mode doesn't support it; the player logs that and stays quiet.)
+        ambience = BackgroundAudioPlayer(
+            ambient_sound=AudioConfig(
+                AMBIENT_CLIPS[AMBIENT_SOUND], volume=AMBIENT_VOLUME, fade_in=1.0
+            ),
+        )
+        await ambience.start(room=ctx.room, agent_session=session)
+        ctx.add_shutdown_callback(ambience.aclose)
+    elif AMBIENT_SOUND != "off":
+        logger.warning("unknown AMBIENT_SOUND %r; ambience is off", AMBIENT_SOUND)
 
 
 if __name__ == "__main__":
