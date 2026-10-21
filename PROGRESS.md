@@ -61,16 +61,16 @@ PC's mic and speakers in the terminal (no WebRTC, so its latency isn't the web n
 
 | Check | Target | Latest result | Date |
 | --- | --- | --- | --- |
-| Web response latency p50 / p90 | ≤ 900 / 1,400 ms | | |
+| Web response latency p50 / p90 | ≤ 900 / 1,400 ms | **2,784 / 5,115 ms** (Agent Console, agent running on Dev's PC in India, 3 calls, 5 timed turns). Clean-audio local floor ~1.9 s. Not met; needs a measurement from the deployed agent | 2026-10-21 |
 | Phone response latency p50 / p90 | ≤ 1,200 / 1,800 ms | | |
-| Greeting start after connect | ≤ 1,000 ms web | | |
+| Greeting start after connect | ≤ 1,000 ms web | 2,270–2,586 ms warm, 11,196 ms first (cold) call; 1,317 ms in local audio mode. Not met | 2026-10-21 |
 | Barge-in stop time | ≤ 300 ms | | |
 | Backchannels ignored | yes | | |
 | Numbers, ZIPs, times spoken correctly | yes | | |
 | Silence handling and clean end-call | yes | Text mode: check-ins, close and end_call work; unit and behavior tests green. Audio not yet checked | 2026-10-20 |
 | Scenario suite pass rate | 100% | | |
 | QA grader: critical findings | 0 | | |
-| Dev's listening check vs Retell standard | pass | | |
+| Dev's listening check vs Retell standard | pass | Dev: Agent Console call "fine". Voice: Andromeda | 2026-10-21 |
 
 ## Quota and cost log
 
@@ -84,6 +84,8 @@ Gemini rate-limit hits). Target: $0.
 | 2026-10-20 | Turn detector (`inference.TurnDetector`): 7,500 requests/month when self-hosted; requests from agents deployed to LiveKit Cloud don't count. At the cap it falls back to the local `v1-mini` model. Adaptive interruptions: 40,000 requests/month self-hosted, then falls back to VAD-based detection. |
 | 2026-10-20 | **Gemini free tier is too slow for voice.** Dev's key (project on Free), from Dev's machine (plain round trip to Google 0.2–0.5 s), ~16:30–17:00 UTC, 4 runs each: `gemini-3.5-flash-lite` streaming time to first token median **16.3 s** (11–28 s); Priority via the Interactions API median 17.7 s; `serviceTier: priority` on generateContent median 13.7 s, but the response header said `standard` (silently downgraded). `gemini-3.8-flash`: three of four 503 "high demand" or timeout, one success at 60 s. Target total response is ≤ 0.9 s p50. Rule 8: Dev decides the LLM. |
 | 2026-10-20 | LiveKit Inference LLM benchmark (6 models × 8 calls, then 4 × 24): about 300 tiny requests, well under $0.05 of the $2.50 credit. Time to first token is ~1 s from India (gateway round trip 0.2–0.3 s); gpt-4.1-nano was best (0.76 s reply p50). Table in docs/decisions.md. |
+| 2026-10-21 | **Latency diagnosis.** Dev's Agent Console calls (web, agent local in India): total p50 2.8 s, p90 5.1 s; end of utterance p50 2.5 s; STT final 1.3–3.8 s; LLM 0.84 s; TTS 0.38 s. Clean speech through the local audio pipeline (debugger `--audio`): end of turn ~0.5 s, LLM 0.8–1.2 s, TTS 0.36–0.56 s, total ~1.9–2.1 s. After a spoken ZIP the turn detector's end-of-turn probability was 0.28 (threshold 0.36), so it waited the full 2.5 s `max_delay` (total 3.2 s); Dev's 2,505 ms turn matches. Dev's 3.8 s turns waited on Deepgram's final transcript, which clean audio doesn't reproduce. Each stage includes India↔US round trips, so the web number has to come from the deployed agent. |
+| 2026-10-21 | Debugger audio mode: 5 spoken lines through LiveKit Inference TTS (a few hundred characters of the credit). |
 | 2026-10-20 | M1 work on LiveKit Inference: ~25 behavior-suite runs plus debugger calls, roughly $0.20–0.30 of the $2.50 credit (estimate from token counts; check the Usage page in LiveKit Cloud). One suite run is about $0.01. |
 | 2026-10-20 | Deepgram: 7 voice samples, ~3,700 characters of Aura-2 (about $0.11 of the $200 credit). First byte for a 534-character request was 0.8–1.1 s from India. |
 | 2026-10-20 | Text-mode debugger (no audio), from India: LLM first token p50 815 ms, p90 1,046 ms (11 turns); greeting start 1.5 s, and 4.0 s on a cold start, already over the 1 s target before TTS. If the live session confirms it, pre-synthesize the fixed greeting at startup (`say()` accepts audio). |
@@ -101,8 +103,14 @@ Gemini rate-limit hits). Target: $0.
   shared with dev testing and any debugger audio-mode TTS. At M4 the public page's
   `MAX_SESSIONS_PER_DAY` (40 in `.env.example`) must drop to about 5, and Riley must close politely
   when the credit is exhausted.
-- **Riley doesn't say the caller's name** (M1 prompt): "at most once" still repeated it in 1 of 4
-  runs. Revisit at M5 with pass rates if Dev wants a single "Thanks, Jordan".
+- **Known bug: name repetition.** "Don't say the caller's name" passed 6/6 once, then 2/4 on
+  2026-10-21, and a live audio run said "Thanks, Jordan" on three turns in a row. A prompt alone
+  doesn't hold at Gemini's default temperature. Fix in M2: the first name lives in `CallState`, and a
+  tested output step stops the caller being addressed by name. The behavior test is in place.
+- **Digits stall the turn detector:** after a spoken ZIP or phone number its end-of-turn
+  probability drops under the threshold and it waits the full 2.5 s. Tune in M2 when Riley knows
+  it just asked for a number (for example a lower `max_delay` while collecting digits).
+- **Ambience level:** Dev to choose from `voice-samples\ambience\` (A/B office, C/D crowded room).
 - **Latency budget is tight:** LLM time to first token alone is ~0.8–1.0 s from India, against a
   0.9 s total target (end of turn + LLM + TTS). Local M1 numbers will include India↔US network
   hops for STT, LLM and TTS; the headline numbers come from the deployed agent (M4). If they still
