@@ -1,0 +1,171 @@
+"""Tool logic end to end, without LiveKit: what each tool does to CallState and what it returns.
+
+Mirrors the scenarios in CLAUDE.md section 9 at the decision-layer level.
+"""
+
+import pytest
+
+from agent.config import load_config
+from agent.gates import Decision
+from agent.intake import (
+    record_caller_details,
+    record_issue,
+    record_service_location,
+    report_safety_hazard,
+    request_callback,
+)
+from agent.state import CallState, Outcome
+
+CFG = load_config()
+
+
+@pytest.fixture
+def s():
+    return CallState(call_id="test")
+
+
+def test_happy_path_collects_normalized_details_until_ready(s):
+    r = record_issue(s, CFG, category="ac_repair", symptoms="blowing warm air", not_working=True)
+    assert (r.decision, r.next_step) == (Decision.MISSING, "ask:first_name")
+
+    r = record_caller_details(
+        s, CFG, first_name=" Jordan ", callback_number="six oh two, five five five, oh one four two"
+    )
+    assert (r.decision, r.next_step) == (Decision.MISSING, "ask:zip_code")
+    assert (s.first_name, s.callback_number) == ("Jordan", "6025550142")
+
+    r = record_service_location(s, CFG, zip_code="eight five oh one six")
+    assert r.decision is Decision.READY_TO_BOOK
+    assert s.zip_code == "85016"
+    assert s.outcome is None  # not decided until booking (M3)
+
+
+def test_details_can_arrive_in_any_order(s):
+    record_service_location(s, CFG, zip_code="85016")
+    record_caller_details(s, CFG, callback_number="602-555-0142")
+    r = record_issue(s, CFG, category="thermostat", symptoms="screen is blank")
+    assert r.next_step == "ask:first_name"
+
+
+def test_out_of_area_zip_ends_the_call_with_that_outcome(s):
+    r = record_service_location(s, CFG, zip_code="85301")
+    assert r.decision is Decision.OUT_OF_AREA
+    assert r.next_step == "end_call"
+    assert s.outcome is Outcome.OUT_OF_AREA
+
+
+def test_unreadable_zip_asks_again_then_offers_a_callback(s):
+    record_caller_details(s, CFG, first_name="Jordan", callback_number="6025550142")
+    first = record_service_location(s, CFG, zip_code="somewhere near the park")
+    assert (first.decision, first.next_step) == (Decision.ASK_AGAIN, "ask:zip_code")
+    second = record_service_location(s, CFG, zip_code="I don't know")
+    assert (second.decision, second.next_step) == (Decision.OFFER_CALLBACK, "take_callback_details")
+
+
+def test_a_good_value_resets_the_miss_count(s):
+    record_service_location(s, CFG, zip_code="no idea")
+    record_service_location(s, CFG, zip_code="85016")
+    assert "zip_code" not in s.failed_attempts
+
+
+def test_unreadable_number_twice_ends_politely_as_incomplete(s):
+    record_caller_details(s, CFG, callback_number="five five five")
+    r = record_caller_details(s, CFG, callback_number="call me whenever")
+    assert (r.decision, r.next_step) == (Decision.OFFER_CALLBACK, "end_call")
+    assert s.outcome is Outcome.INCOMPLETE
+
+
+def test_service_not_offered_declines_with_that_outcome(s):
+    r = record_issue(s, CFG, category="commercial_or_rooftop", symptoms="rooftop unit at my store")
+    assert r.decision is Decision.NOT_OFFERED
+    assert s.outcome is Outcome.NOT_OFFERED
+
+
+def test_unknown_category_is_rejected_so_the_llm_can_correct_it(s):
+    with pytest.raises(ValueError, match="unknown category"):
+        record_issue(s, CFG, category="pool_heater", symptoms="cold pool")
+
+
+def test_gas_smell_mid_call_after_a_zip_overrides_everything(s):
+    record_issue(s, CFG, category="ac_repair", symptoms="not cooling", not_working=True)
+    record_service_location(s, CFG, zip_code="85016")
+    r = report_safety_hazard(s, CFG, signal="gas_smell")
+    assert r.decision is Decision.SAFETY_REDIRECT
+    assert CFG.safety_script in r.say
+    assert s.outcome is Outcome.SAFETY_REDIRECT
+    # And nothing afterwards can make the call bookable.
+    after = record_caller_details(s, CFG, first_name="Jordan", callback_number="6025550142")
+    assert after.decision is Decision.NOT_BOOKABLE
+
+
+def test_no_ac_and_i_smell_gas_in_one_breath_is_a_safety_redirect(s):
+    r = record_issue(
+        s,
+        CFG,
+        category="ac_repair",
+        symptoms="no AC",
+        not_working=True,
+        safety_signals=["gas_smell"],
+    )
+    assert r.decision is Decision.SAFETY_REDIRECT
+
+
+def test_unknown_hazard_id_is_rejected(s):
+    with pytest.raises(ValueError, match="unknown safety signal"):
+        report_safety_hazard(s, CFG, signal="weird_noise")
+
+
+def test_priority_is_recorded_and_mentioned(s):
+    r = record_issue(
+        s,
+        CFG,
+        category="ac_repair",
+        symptoms="no cooling at all",
+        not_working=True,
+        vulnerable_occupant="age_65_plus",
+    )
+    assert s.priority is True
+    assert "priority" in r.say
+    assert r.next_step == "ask:first_name"
+
+
+def test_unrecognised_vulnerable_occupant_is_ignored(s):
+    record_issue(
+        s, CFG, category="ac_repair", symptoms="x", not_working=True, vulnerable_occupant="cat"
+    )
+    assert s.vulnerable_occupant is None and s.priority is False
+
+
+def test_callback_request_collects_name_and_number_then_promises(s):
+    r = request_callback(s, CFG, reason="billing")
+    assert r.next_step == "ask:first_name"
+    r = record_caller_details(s, CFG, first_name="Jordan", callback_number="602 555 0142")
+    assert r.decision is Decision.CALLBACK_READY
+    assert s.outcome is Outcome.CALLBACK_REQUESTED
+
+
+def test_callback_with_details_in_one_go(s):
+    r = request_callback(
+        s, CFG, reason="wants_human", first_name="Jordan", callback_number="6025550142"
+    )
+    assert r.decision is Decision.CALLBACK_READY
+
+
+def test_unknown_callback_reason_becomes_other(s):
+    request_callback(s, CFG, reason="weather chat")
+    assert s.callback_reason == "other"
+
+
+def test_a_corrected_number_replaces_the_old_one(s):
+    record_caller_details(s, CFG, callback_number="602-555-0142")
+    record_caller_details(s, CFG, callback_number="602-555-0199")
+    assert s.callback_number == "6025550199"
+
+
+def test_next_field_is_remembered_for_endpointing(s):
+    record_issue(s, CFG, category="ac_repair", symptoms="warm air")
+    assert s.expecting == "first_name"
+    record_caller_details(s, CFG, first_name="Jordan", callback_number="6025550142")
+    assert s.expecting == "zip_code"
+    record_service_location(s, CFG, zip_code="85016")
+    assert s.expecting is None

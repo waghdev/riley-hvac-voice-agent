@@ -30,6 +30,10 @@ class CallState:
     indoor_temp_f: int | None = None  # only if the caller mentioned it
     vulnerable_occupant: str | None = None  # one of business.yaml urgency.vulnerable_occupants
     safety_signals: set[str] = field(default_factory=set)  # ids from business.yaml safety.signals
+    priority: bool = False  # set by the urgency gate; M3's booking offers the earliest window
     failed_attempts: dict[str, int] = field(default_factory=dict)  # field -> misses so far
     callback_reason: str | None = None
     outcome: Outcome | None = None
+    # Conversation control, not a business fact: the detail Riley just asked for, so main.py can
+    # shorten endpointing for short answers (a name, a number, a ZIP).
+    expecting: str | None = None
