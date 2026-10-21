@@ -42,7 +42,7 @@ logger = logging.getLogger("riley")
 
 BUSINESS = load_business()
 LLM_MODEL = os.getenv("LLM_MODEL", "google/gemini-3.1-flash-lite")
-TTS_VOICE = os.getenv("TTS_VOICE", "aura-2-thalia-en")
+TTS_VOICE = os.getenv("TTS_VOICE", "aura-2-andromeda-en")  # chosen by listening, decisions.md
 MAX_CALL_SECONDS = float(os.getenv("MAX_CALL_SECONDS", "300"))
 METRICS_DIR = Path(os.getenv("METRICS_DIR", REPO_ROOT / "metrics"))
 

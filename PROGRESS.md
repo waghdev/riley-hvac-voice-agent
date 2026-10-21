@@ -11,16 +11,14 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
 - **Stack as built:** Deepgram `nova-3` STT + Aura-2 TTS (Dev's key), LLM
   `google/gemini-3.1-flash-lite` on LiveKit Inference (free Build credit), `inference.TurnDetector()`,
   bundled Silero VAD, ai-coustics `QUAIL_L`.
-- **Next step:** Dev's M1 voice session: pick a voice from `voice-samples/`, then talk to Riley in
-  the Agent Console (steps in "M1 voice session" below). Claude then runs the latency report,
-  tunes, and closes M1.
+- **Next step:** Dev talks to Riley in the Agent Console (steps in "M1 voice session" below; the
+  voice is chosen: Andromeda). Claude then runs the latency report, tunes, and closes M1.
 - **Blockers:** M1 can't close without that session (listening and live audio).
 
 ## M1 voice session (Dev, about 10 minutes)
 
 1. Restart VS Code (so its terminals see `uv` and `lk`, which were installed during the session).
-2. Listen to the seven samples in `voice-samples\` (same script, read by each voice; the script
-   is in `voice-samples\script.txt`). Pick one or two.
+2. ~~Pick a voice~~ Done 2026-10-21: Dev chose Aura-2 Andromeda (`TTS_VOICE` in `.env`).
 3. In a VS Code terminal: `uv run python -m agent.main dev` (leave it running).
 4. Open https://cloud.livekit.io, pick the project, go to Agents, and use **Launch Console** for
    `riley`. Allow the microphone.
@@ -76,7 +74,7 @@ PC's mic and speakers in the terminal (no WebRTC, so its latency isn't the web n
 
 ## Quota and cost log
 
-Record free-tier usage observations here (agent minutes, inbound minutes, Deepgram credit left,
+Record free-tier usage observations here (agent minutes, inboun d minutes, Deepgram credit left,
 Gemini rate-limit hits). Target: $0.
 
 | Date | Observation |

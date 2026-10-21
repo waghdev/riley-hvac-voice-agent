@@ -2,6 +2,17 @@
 
 One entry per decision: date, decision, alternatives considered, reason. Newest at the top.
 
+## 2026-10-21: Voice is Deepgram Aura-2 Andromeda (chosen by Dev, by listening)
+
+- **Decision:** `TTS_VOICE=aura-2-andromeda-en`.
+- **How:** seven Aura-2 voices tagged for customer service read the same script (greeting,
+  acknowledgement, phone number read-back, two time windows, safety line): Thalia, Harmonia, Vesta,
+  Andromeda, Arcas, Neptune, Orpheus. Dev picked Andromeda.
+- **Riley's gender:** Riley is a unisex name, and neither `business.md` nor the prompt gives Riley
+  a gender, so the voice was chosen on sound alone; nothing else depends on it.
+- **Still to check live:** how it sounds through the full pipeline in the Agent Console, and
+  whether "Kestrel" needs a pronunciation entry (M2 text normalization).
+
 ## 2026-10-20: LLM switched to google/gemini-3.1-flash-lite (behavior tests beat the benchmark)
 
 - **Decision:** `LLM_MODEL=google/gemini-3.1-flash-lite` on LiveKit Inference, at the model's
