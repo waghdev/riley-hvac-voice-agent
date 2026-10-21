@@ -4,8 +4,8 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
 
 ## Current state
 
-- **Milestone:** M1 done (2026-10-21), with the latency gap recorded and Dev's decision to fix it in
-  M2. Next: M2 Decision layer.
+- **Milestone:** M2 Decision layer: built, tested and deployed (2026-10-21). Waiting on Dev's cloud
+  call to check it against the quality bar, then M2 closes.
 - **Location:** `C:\Users\Devendra\Projects\Riley - HVAC`. Repo: https://github.com/waghdev/voice-agent-reference
   (private until M7). LiveKit project: `riley-kestrel-comfort-heating-a` (Build).
 - **Stack as built:** Deepgram `nova-3` STT + Aura-2 TTS (Dev's key), LLM
@@ -13,10 +13,10 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
   bundled Silero VAD, ai-coustics `QUAIL_L`.
 - **Deployed:** `riley` runs on LiveKit Cloud in `us-east` (Build plan), so latency can be measured
   the way visitors will get it. Office ambience and keyboard typing are on.
-- **Next step:** M2. First, check the current LiveKit pattern for tools/tasks and record the agent
-  structure; then `state.py` and `gates.py` with table-driven tests, tools, text normalization,
-  the name-repetition guard, and context-aware endpointing (shorter `max_delay` while Riley
-  collects a name, number or ZIP).
+- **Next step:** Dev calls the deployed agent (Agent Console) and tries: a normal intake with a
+  phone number and ZIP; a ZIP outside the area (85301); "I need my ducts cleaned"; "can I talk to
+  a person about my bill?"; and, last, "I smell gas". Claude turns the cloud logs into the latency
+  table, then closes M2 and starts M3 (mock calendar, booking, CRM).
 - **Blockers:** none.
 
 ## M1 quality-bar gaps carried into M2 and later (Dev decided, 2026-10-21)
@@ -57,7 +57,7 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
 
 - [x] M0 Setup (2026-10-20)
 - [x] M1 Talking agent (2026-10-21; latency gaps above carried into M2/M4)
-- [ ] M2 Decision layer
+- [ ] M2 Decision layer (built, 239 unit + 11 behavior tests, deployed; waiting on Dev's call)
 - [ ] M3 Booking and CRM
 - [ ] M4 Web call page
 - [ ] M5 Evals and quality
@@ -135,6 +135,23 @@ Gemini rate-limit hits). Target: $0.
   scaileai.com; check Vercel Hobby terms first).
 
 ## Session log
+
+### 2026-10-21: M2 decision layer built and deployed
+
+- Structure (Dev approved): one agent with tools. `config.py` (typed `BusinessConfig`),
+  `parsing.py` (spoken digits, ZIP+4, phone formats), `state.py`, `gates.py` (safety, area,
+  offered, urgency, readiness with NOT_BOOKABLE, two-strikes retry, callback), `intake.py` (tool
+  logic), `tools.py` (LiveKit wrappers), `spoken.py` (numbers, NameGuard, LeadingAckGuard).
+- Code now enforces what the prompt couldn't: exact safety script and hang-up; hang-up after a
+  gate ends the call; no second goodbye; 1 s `max_delay` for short answers; a spoken "Got it."
+  during tool turns; name at most once; numbers spoken naturally. Details and measurements in
+  decisions.md.
+- Bugs found in debugger and behavior runs, each with a test first: placeholder arguments
+  ("unknown"); indoor temperature 0; two goodbyes or none on gate-ended calls; double
+  acknowledgement; behavior tests that punished correct behavior (fixed in the tests).
+- Tests: 239 unit (CI), 11 behavior (`-m llm`, 4 clean runs at the end).
+- README: "The decision layer" section written.
+- Deployed to LiveKit Cloud (us-east).
 
 ### 2026-10-21: M1 closed
 

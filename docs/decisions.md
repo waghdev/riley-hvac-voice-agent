@@ -2,6 +2,38 @@
 
 One entry per decision: date, decision, alternatives considered, reason. Newest at the top.
 
+## 2026-10-21: M2 as built: what the prompt asks for, and what code enforces
+
+Every rule below was tried in the prompt first wherever possible; each one that the model
+(gemini-3.1-flash-lite, default temperature) didn't follow reliably moved into code, with a test.
+
+- **Safety (code):** `report_safety_hazard`, or a hazard passed to `record_issue`, makes the tool
+  play the exact safety script (uninterruptible) and hang up when it ends. The tool returns
+  nothing, so there's no LLM reply that could reword it.
+- **Gate-ended calls (code):** out of area, not offered, callback taken, or a number that couldn't
+  be caught twice. The tool hangs up after Riley's one reply (shutdown when the tool's speech
+  handle completes, the same hook `EndCallTool` uses). Leaving it to the model produced two
+  goodbyes, or none and an open line. `end_call` cues no goodbye once a gate has ended the call.
+- **Short answers (code):** `max_delay` is 1.0 s while Riley waits for a name, number or ZIP, and
+  2.5 s otherwise; it resets on every caller turn. Measured in the audio pipeline: the phone-number
+  turn's end of utterance went from ~2,500 ms to 1,002 ms (detector probability 0.35 against a
+  0.36 threshold).
+- **Spoken acknowledgement (code):** tool turns need two LLM round trips before any audio, and the
+  model won't put text before its tool call. The tool says a rotating "Got it." / "Okay." /
+  "Thanks." (once per caller turn) while the reply is written, following LiveKit's documented
+  hold-message pattern. First audio on tool turns: 3.1–3.3 s → 1.8–2.0 s on Dev's PC.
+  The reply still opened with "Thanks." in 2 of 2 runs despite the prompt and a tool-result field,
+  so `LeadingAckGuard` drops a leading acknowledgement before TTS.
+- **Caller's name (code):** `NameGuard` keeps the first vocative use and drops later ones before
+  TTS; read-back mentions stay.
+- **Numbers (code):** `speak_numbers_stream` before TTS; the transcript keeps digits.
+- **Model quirks (code):** placeholder arguments ("unknown", "N/A") count as not given; indoor
+  temperatures outside 40–140°F (the model passed 0) are ignored.
+- **Prompt:** ~460 words (persona, how to follow `say`/`next_step`, allowed prices, categories).
+- **Known gap:** the TTS-only guards don't change the transcript, which still shows the model's
+  words (a second "Thanks.", a repeated name). The M4 web page shows a live transcript; revisit
+  with a transcription-node transform if it reads badly there.
+
 ## 2026-10-21: M2 structure: one agent with tools, gates in pure Python (approved by Dev)
 
 - **Decision:** a single `Riley` agent with a small set of tools. Each tool validates its input,
