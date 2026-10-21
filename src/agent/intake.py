@@ -33,6 +33,18 @@ _NOT_BOOKABLE_OUTCOMES = {
 }
 
 
+# What LLMs put in an argument they don't have a value for (debugger call, 2026-10-21: the
+# model called request_callback(first_name="unknown", callback_number="unknown")).
+_PLACEHOLDERS = frozenset({"unknown", "n/a", "na", "none", "null", "not provided", "not given"})
+
+
+def _given(value: str | None) -> str | None:
+    """The value, stripped, or None if it's empty or a placeholder rather than something said."""
+    if value is None or not value.strip() or value.strip().lower() in _PLACEHOLDERS:
+        return None
+    return value.strip()
+
+
 def _settle(state: CallState, result: GateResult) -> GateResult:
     """Record the outcome if this decision ends the call, and what Riley will ask next."""
     outcome = terminal_outcome(result.decision)
@@ -69,8 +81,9 @@ def record_caller_details(
     first_name: str | None = None,
     callback_number: str | None = None,
 ) -> GateResult:
-    if first_name and first_name.strip():
-        state.first_name = first_name.strip()
+    first_name, callback_number = _given(first_name), _given(callback_number)
+    if first_name is not None:
+        state.first_name = first_name
     if callback_number is not None:
         number = normalize_phone(callback_number)
         if number is None:

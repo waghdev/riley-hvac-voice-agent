@@ -169,3 +169,17 @@ def test_next_field_is_remembered_for_endpointing(s):
     assert s.expecting == "zip_code"
     record_service_location(s, CFG, zip_code="85016")
     assert s.expecting is None
+
+
+@pytest.mark.parametrize("placeholder", ["unknown", "Unknown", "N/A", "none", "not provided", " "])
+def test_placeholder_values_from_the_llm_count_as_not_given(s, placeholder):
+    # Bug (debugger call, 2026-10-21): for "can I talk to a real person about my bill?" the LLM
+    # called request_callback(first_name="unknown", callback_number="unknown"). The name was
+    # stored as "unknown" and the fake number counted as a failed attempt.
+    r = request_callback(
+        s, CFG, reason="billing", first_name=placeholder, callback_number=placeholder
+    )
+    assert s.first_name is None
+    assert s.callback_number is None
+    assert s.failed_attempts == {}
+    assert r.next_step == "ask:first_name"
