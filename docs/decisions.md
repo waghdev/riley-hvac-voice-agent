@@ -2,6 +2,28 @@
 
 One entry per decision: date, decision, alternatives considered, reason. Newest at the top.
 
+## 2026-10-21: Pre-rendered greeting, hang-up order, louder background audio
+
+- **Greeting clip:** on Dev's first cloud call, "This call may be recorded for quality." sounded like
+  a different voice. The Deepgram plugin streams over a WebSocket and flushes after each segment, so
+  each sentence is synthesized separately, and Aura-2 can deliver a short standalone sentence quite
+  differently. The voice samples Dev approved were one request each, and sounded consistent. The
+  greeting is fixed text, so `scripts/make_greeting_audio.py` renders it in one request into
+  `assets/greeting.wav`, with a manifest of the exact text, voice and SHA-256. Riley plays it with
+  `session.say(text, audio=...)` only if text and voice still match; otherwise live TTS. A unit test
+  fails if `business.yaml`'s greeting or the default voice changes without re-rendering. Side
+  benefit: the greeting no longer waits on TTS. `.gitattributes` keeps the WAV binary.
+  Alternative considered: sending the greeting to TTS as one segment; rejected because it still
+  costs TTS time on every call and depends on plugin internals.
+- **Hang-up order:** the SDK sends "exiting", disconnects the room, *then* runs shutdown callbacks.
+  Closing background audio as a shutdown callback therefore unpublished a track from a disconnected
+  room, and the job hung 10 s until LiveKit killed it. Now the session close handler closes
+  background audio (bounded at 2 s), then deletes the room (hanging up the caller), then ends the
+  job. `RoomOptions.delete_room_on_close` is off because it deleted the room at the same moment.
+- **Volumes:** Dev asked for "a little louder" after the call: +3 dB on both, ambience 2.5 → 3.5
+  (~17 dB under speech, peaks −27 dBFS) and typing 0.35 → 0.5 (~12 dB under, peaks −12 dBFS). No
+  clipping at either level.
+
 ## 2026-10-21: Deploy to LiveKit Cloud us-east now, to measure the real web latency (Dev approved)
 
 - **Decision:** the agent runs on LiveKit Cloud (Build plan) in `us-east`, ahead of M4, so latency

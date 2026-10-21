@@ -13,9 +13,9 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
   bundled Silero VAD, ai-coustics `QUAIL_L`.
 - **Deployed:** `riley` runs on LiveKit Cloud in `us-east` (Build plan), so latency can be measured
   the way visitors will get it. Office ambience and keyboard typing are on.
-- **Next step:** Dev calls the deployed agent from the Agent Console (stop any local `dev` worker
-  first, or calls may go to it). Claude turns the cloud logs into the latency table, tunes, and
-  closes M1 or reports the gap (rule 8).
+- **Next step:** Dev makes another cloud call to check the one-voice greeting, the louder
+  background audio and the clean hang-up. Then latency tuning: LLM first token (735 ms) is the
+  largest stage, and turns after spoken digits wait the full 2.5 s.
 - **Blockers:** M1 can't close without that session (listening and live audio).
 
 ## M1 voice session (Dev, about 10 minutes)
@@ -64,9 +64,9 @@ PC's mic and speakers in the terminal (no WebRTC, so its latency isn't the web n
 
 | Check | Target | Latest result | Date |
 | --- | --- | --- | --- |
-| Web response latency p50 / p90 | ≤ 900 / 1,400 ms | **2,784 / 5,115 ms** (Agent Console, agent running on Dev's PC in India, 3 calls, 5 timed turns). Clean-audio local floor ~1.9 s. Not met; needs a measurement from the deployed agent | 2026-10-21 |
+| Web response latency p50 / p90 | ≤ 900 / 1,400 ms | **1,308 / 2,652 ms** from the deployed agent (LiveKit Cloud us-east, Dev calling from India, 1 call, 5 turns). LLM first token (735 ms) now dominates; the p90 turn is the 2.5 s digit wait. Was 2,784 / 5,115 with the agent on Dev's PC. Not met yet | 2026-10-21 |
 | Phone response latency p50 / p90 | ≤ 1,200 / 1,800 ms | | |
-| Greeting start after connect | ≤ 1,000 ms web | 2,270–2,586 ms warm, 11,196 ms first (cold) call; 1,317 ms in local audio mode. Not met | 2026-10-21 |
+| Greeting start after connect | ≤ 1,000 ms web | 1,361 ms from the deployed agent with live TTS (was 2.3–2.6 s local). Now pre-rendered (no TTS); re-measure on the next call | 2026-10-21 |
 | Barge-in stop time | ≤ 300 ms | | |
 | Backchannels ignored | yes | | |
 | Numbers, ZIPs, times spoken correctly | yes | | |
@@ -87,6 +87,7 @@ Gemini rate-limit hits). Target: $0.
 | 2026-10-20 | Turn detector (`inference.TurnDetector`): 7,500 requests/month when self-hosted; requests from agents deployed to LiveKit Cloud don't count. At the cap it falls back to the local `v1-mini` model. Adaptive interruptions: 40,000 requests/month self-hosted, then falls back to VAD-based detection. |
 | 2026-10-20 | **Gemini free tier is too slow for voice.** Dev's key (project on Free), from Dev's machine (plain round trip to Google 0.2–0.5 s), ~16:30–17:00 UTC, 4 runs each: `gemini-3.5-flash-lite` streaming time to first token median **16.3 s** (11–28 s); Priority via the Interactions API median 17.7 s; `serviceTier: priority` on generateContent median 13.7 s, but the response header said `standard` (silently downgraded). `gemini-3.8-flash`: three of four 503 "high demand" or timeout, one success at 60 s. Target total response is ≤ 0.9 s p50. Rule 8: Dev decides the LLM. |
 | 2026-10-20 | LiveKit Inference LLM benchmark (6 models × 8 calls, then 4 × 24): about 300 tiny requests, well under $0.05 of the $2.50 credit. Time to first token is ~1 s from India (gateway round trip 0.2–0.3 s); gpt-4.1-nano was best (0.76 s reply p50). Table in docs/decisions.md. |
+| 2026-10-21 | **First cloud call** (us-east): total p50 1,308 ms, p90 2,652; end of utterance 387 ms; STT 234 ms; LLM 735 ms; TTS 136 ms; greeting start 1,361 ms. Logs: one hosted turn-detector timeout (fell back to the local mini model); the job hung 10 s at exit and was killed (fixed: background audio now closes before the room is deleted; verify on the next call). |
 | 2026-10-21 | **Latency diagnosis.** Dev's Agent Console calls (web, agent local in India): total p50 2.8 s, p90 5.1 s; end of utterance p50 2.5 s; STT final 1.3–3.8 s; LLM 0.84 s; TTS 0.38 s. Clean speech through the local audio pipeline (debugger `--audio`): end of turn ~0.5 s, LLM 0.8–1.2 s, TTS 0.36–0.56 s, total ~1.9–2.1 s. After a spoken ZIP the turn detector's end-of-turn probability was 0.28 (threshold 0.36), so it waited the full 2.5 s `max_delay` (total 3.2 s); Dev's 2,505 ms turn matches. Dev's 3.8 s turns waited on Deepgram's final transcript, which clean audio doesn't reproduce. Each stage includes India↔US round trips, so the web number has to come from the deployed agent. |
 | 2026-10-21 | Debugger audio mode: 5 spoken lines through LiveKit Inference TTS (a few hundred characters of the credit). |
 | 2026-10-20 | M1 work on LiveKit Inference: ~25 behavior-suite runs plus debugger calls, roughly $0.20–0.30 of the $2.50 credit (estimate from token counts; check the Usage page in LiveKit Cloud). One suite run is about $0.01. |
