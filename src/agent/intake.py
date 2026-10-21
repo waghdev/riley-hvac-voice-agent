@@ -36,6 +36,7 @@ _NOT_BOOKABLE_OUTCOMES = {
 # What LLMs put in an argument they don't have a value for (debugger call, 2026-10-21: the
 # model called request_callback(first_name="unknown", callback_number="unknown")).
 _PLACEHOLDERS = frozenset({"unknown", "n/a", "na", "none", "null", "not provided", "not given"})
+INDOOR_TEMP_RANGE_F = (40, 140)  # anything outside this isn't a reading a caller would give
 
 
 def _given(value: str | None) -> str | None:
@@ -126,7 +127,11 @@ def record_issue(
     state.not_working = not_working
     if vulnerable_occupant in cfg.vulnerable_occupants:
         state.vulnerable_occupant = vulnerable_occupant
-    if indoor_temp_f is not None:
+    # A real indoor reading, not a placeholder: the LLM has passed 0 for "not mentioned".
+    if (
+        indoor_temp_f is not None
+        and INDOOR_TEMP_RANGE_F[0] <= indoor_temp_f <= INDOOR_TEMP_RANGE_F[1]
+    ):
         state.indoor_temp_f = indoor_temp_f
     state.safety_signals |= set(safety_signals) & cfg.safety_signals
 

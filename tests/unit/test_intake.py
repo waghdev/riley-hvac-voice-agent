@@ -183,3 +183,12 @@ def test_placeholder_values_from_the_llm_count_as_not_given(s, placeholder):
     assert s.callback_number is None
     assert s.failed_attempts == {}
     assert r.next_step == "ask:first_name"
+
+
+@pytest.mark.parametrize(
+    ("said", "stored"), [(0, None), (-1, None), (500, None), (93, 93), (72, 72)]
+)
+def test_implausible_indoor_temperatures_are_not_stored(s, said, stored):
+    # Bug (audio debugger call, 2026-10-21): the LLM passed indoor_temp_f=0 for "not mentioned".
+    record_issue(s, CFG, category="ac_repair", symptoms="warm air", indoor_temp_f=said)
+    assert s.indoor_temp_f == stored
