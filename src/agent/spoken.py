@@ -11,7 +11,7 @@ tts_text_transforms.
 """
 
 import re
-from collections.abc import AsyncIterable, AsyncIterator
+from collections.abc import AsyncIterable, AsyncIterator, Callable
 
 _ONES = [
     "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
@@ -164,3 +164,83 @@ async def speak_numbers_stream(text: AsyncIterable[str]) -> AsyncIterator[str]:
             yield speak_numbers(ready)
     if pending:
         yield speak_numbers(pending)
+
+
+# --- Addressing the caller by name -------------------------------------------------------
+
+
+class NameGuard:
+    """A tts_text_transforms entry: Riley addresses the caller by name at most once per call.
+
+    Bug (debugger and cloud calls): "Thanks, Jordan." turn after turn; a prompt rule held only
+    about half the time. Vocative uses after the first ("Thanks, Jordan." / "Jordan, what's...")
+    are dropped before TTS. Mentions inside a sentence ("I have your name as Jordan") are read-
+    backs and stay. One instance per call; `get_name` returns the recorded first name, or None.
+    Only what the caller hears changes; the transcript keeps the model's words.
+    """
+
+    def __init__(self, get_name: Callable[[], str | None]) -> None:
+        self._get_name = get_name
+        self._used = False
+
+    def __call__(self, text: AsyncIterable[str]) -> AsyncIterator[str]:
+        return self._run(text)
+
+    async def _run(self, text: AsyncIterable[str]) -> AsyncIterator[str]:
+        pending = ""
+        emitted_tail = (
+            ""  # end of what's already gone out, so "Name," knows if it starts a sentence
+        )
+        async for chunk in text:
+            name = self._get_name()
+            buffer = pending + chunk
+            if not name:
+                pending = ""
+                yield buffer
+                emitted_tail = (emitted_tail + buffer)[-3:]
+                continue
+            # Hold back a tail that could still grow into ", Name" or "Name," on the next chunk.
+            cut = len(buffer) - _holdback(buffer, name)
+            ready, pending = buffer[:cut], buffer[cut:]
+            if ready:
+                out = self._apply(ready, name, emitted_tail)
+                emitted_tail = (emitted_tail + out)[-3:]
+                yield out
+        if pending:
+            name = self._get_name()
+            yield self._apply(pending, name, emitted_tail) if name else pending
+
+    def _apply(self, text: str, name: str, before: str) -> str:
+        n = re.escape(name)
+
+        def keep_first(m: re.Match[str], replacement: str) -> str:
+            if not self._used:
+                self._used = True
+                return m.group(0)
+            return replacement
+
+        # "Thanks, Jordan." / "Got it, Jordan, and..." -> drop ", Jordan".
+        text = re.sub(
+            rf",\s*{n}(?=\s*[.!?,]|\s*$)", lambda m: keep_first(m, ""), text, flags=re.IGNORECASE
+        )
+        # "Jordan, what's..." at the start of a sentence -> "What's...".
+        starts_sentence = before == "" or re.search(r"[.!?]\s*$", before) is not None
+        pattern = (
+            rf"(^|(?<=[.!?])\s+){n},\s*(\w)" if starts_sentence else rf"((?<=[.!?])\s+){n},\s*(\w)"
+        )
+        return re.sub(
+            pattern,
+            lambda m: keep_first(m, m.group(1) + m.group(2).upper()),
+            text,
+            flags=re.IGNORECASE,
+        )
+
+
+def _holdback(buffer: str, name: str) -> int:
+    """How many trailing characters might be the start of ", Name" or "Name,"."""
+    low = buffer.lower()
+    patterns = [f", {name.lower()}", f",{name.lower()}", f"{name.lower()},"]
+    for n in range(min(len(buffer), max(len(p) for p in patterns)), 0, -1):
+        if any(p.startswith(low[-n:]) for p in patterns):
+            return n
+    return 0
