@@ -17,3 +17,4 @@ web/.next/
 dist/
 *.egg-info/
 voice-samples/
+livekit.toml

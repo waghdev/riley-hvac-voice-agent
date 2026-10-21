@@ -1,0 +1,39 @@
+# What the agent image doesn't need. LiveKit's CLI also skips .gitignore matches, so .env,
+# .venv/, metrics/ and voice-samples/ are excluded twice over. Secrets come from LiveKit Cloud.
+
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+
+# Tests, scripts and docs (README.md stays: pyproject.toml uses it to build the package)
+tests/
+scripts/
+docs/
+CLAUDE.md
+PROGRESS.md
+
+# Local artifacts
+.venv/
+metrics/
+voice-samples/
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+*.log
+
+# VCS, CI, editor and coding-agent files
+.git
+.gitignore
+.github/
+.vscode/
+.idea/
+.claude/
+.mcp.json
+skills-lock.json
+.DS_Store
+livekit.toml
