@@ -53,3 +53,22 @@ def test_tolerates_a_prefix_before_the_json():
     )
     (record,) = extract([line])
     assert record["call_id"] == "c2"
+
+
+def test_lines_replayed_by_a_reconnect_are_counted_once():
+    # `lk agent logs` replays recent lines on every reconnect, so a capture can repeat records.
+    turn = log_line(
+        message="turn metrics", call_id="c3", channel="web", kind="turn", turn=1, e2e_ms=900.0
+    )
+    greeting = log_line(
+        message="turn metrics", call_id="c3", channel="web", kind="greeting", greeting_start_ms=1.0
+    )
+    next_turn = log_line(
+        message="turn metrics", call_id="c3", channel="web", kind="turn", turn=2, e2e_ms=800.0
+    )
+    records = list(extract([greeting, turn, greeting, turn, next_turn]))
+    assert [(r["kind"], r.get("turn")) for r in records] == [
+        ("greeting", None),
+        ("turn", 1),
+        ("turn", 2),
+    ]

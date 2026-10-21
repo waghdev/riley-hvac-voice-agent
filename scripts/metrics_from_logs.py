@@ -31,6 +31,9 @@ RECORD_KEYS = (
 
 
 def extract(lines: Iterable[str]) -> Iterator[dict[str, Any]]:
+    # `lk agent logs` replays recent lines every time it reconnects, so the same record can appear
+    # more than once in a capture. Each greeting or turn is counted once.
+    seen: set[tuple[Any, ...]] = set()
     for line in lines:
         start = line.find("{")  # the CLI may prefix lines with its own text
         if start < 0:
@@ -39,8 +42,13 @@ def extract(lines: Iterable[str]) -> Iterator[dict[str, Any]]:
             entry = json.loads(line[start:])
         except ValueError:
             continue
-        if entry.get("message") == "turn metrics" and entry.get("kind") in ("turn", "greeting"):
-            yield {k: entry[k] for k in RECORD_KEYS if k in entry}
+        if entry.get("message") != "turn metrics" or entry.get("kind") not in ("turn", "greeting"):
+            continue
+        key = (entry.get("call_id"), entry.get("kind"), entry.get("turn"))
+        if key in seen:
+            continue
+        seen.add(key)
+        yield {k: entry[k] for k in RECORD_KEYS if k in entry}
 
 
 def main(argv: list[str]) -> None:
