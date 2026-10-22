@@ -115,6 +115,9 @@ def test_unknown_hazard_id_is_rejected(s):
         report_safety_hazard(s, CFG, signal="weird_noise")
 
 
+CALLER = ["hi, my AC died and my eighty-year-old mom is here with me"]
+
+
 def test_priority_is_recorded_and_mentioned(s):
     r = record_issue(
         s,
@@ -123,6 +126,8 @@ def test_priority_is_recorded_and_mentioned(s):
         symptoms="no cooling at all",
         not_working=True,
         vulnerable_occupant="age_65_plus",
+        vulnerable_occupant_words="My eighty-year-old mom is here",
+        caller_said=CALLER,
     )
     assert s.priority is True
     assert "priority" in r.say
@@ -131,8 +136,27 @@ def test_priority_is_recorded_and_mentioned(s):
 
 def test_unrecognised_vulnerable_occupant_is_ignored(s):
     record_issue(
-        s, CFG, category="ac_repair", symptoms="x", not_working=True, vulnerable_occupant="cat"
-    )
+        s, CFG, category="ac_repair", symptoms="x", not_working=True, vulnerable_occupant="cat",
+        vulnerable_occupant_words="my eighty-year-old mom", caller_said=CALLER,
+    )  # fmt: skip
+    assert s.vulnerable_occupant is None and s.priority is False
+
+
+@pytest.mark.parametrize(
+    ("words", "caller_said"),
+    [
+        # Bug (debugger call, 2026-10-22): "infant" for a caller who never mentioned anyone.
+        (None, ["hi, my AC stopped cooling, it's blowing warm air"]),
+        ("there's a baby at home", ["hi, my AC stopped cooling, it's blowing warm air"]),
+        ("baby", ["my AC is broken"]),  # words the caller didn't say
+        ("ba", ["ba ba ba"]),  # too short to be evidence
+    ],
+)
+def test_a_vulnerable_occupant_needs_the_callers_own_words(s, words, caller_said):
+    record_issue(
+        s, CFG, category="ac_repair", symptoms="warm air", not_working=True,
+        vulnerable_occupant="infant", vulnerable_occupant_words=words, caller_said=caller_said,
+    )  # fmt: skip
     assert s.vulnerable_occupant is None and s.priority is False
 
 

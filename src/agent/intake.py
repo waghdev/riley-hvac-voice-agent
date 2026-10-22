@@ -30,7 +30,7 @@ from agent.gates import (
     window_taken,
     windows_gate,
 )
-from agent.parsing import normalize_phone, normalize_zip
+from agent.parsing import normalize_phone, normalize_zip, said_by_caller
 from agent.state import CallState, Outcome, ReadBack
 
 # NOT_BOOKABLE carries the reason it can't be booked; each maps to the call's outcome.
@@ -134,14 +134,20 @@ def record_issue(
     vulnerable_occupant: str | None = None,
     indoor_temp_f: int | None = None,
     safety_signals: Iterable[str] = (),
+    vulnerable_occupant_words: str | None = None,
+    caller_said: Sequence[str] = (),
 ) -> GateResult:
+    """caller_said: everything the caller has said on this call, to check the LLM's evidence
+    for a vulnerable occupant against (it makes them up; see parsing.said_by_caller)."""
     if category not in cfg.offered and category not in cfg.not_offered:
         raise ValueError(f"unknown category {category!r}")
     state.category = category
     if symptoms and symptoms.strip():
         state.symptoms = symptoms.strip()
     state.not_working = not_working
-    if vulnerable_occupant in cfg.vulnerable_occupants:
+    if vulnerable_occupant in cfg.vulnerable_occupants and said_by_caller(
+        vulnerable_occupant_words, caller_said
+    ):
         state.vulnerable_occupant = vulnerable_occupant
     # A real indoor reading, not a placeholder: the LLM has passed 0 for "not mentioned".
     if (

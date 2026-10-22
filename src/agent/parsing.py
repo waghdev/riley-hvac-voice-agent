@@ -6,6 +6,7 @@ lives in code, not in the prompt.
 """
 
 import re
+from collections.abc import Iterable
 
 _UNITS = {
     "zero": 0, "oh": 0, "o": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
@@ -80,3 +81,23 @@ def normalize_phone(text: str) -> str | None:
     if digits[0] in "01" or digits[3] in "01":
         return None
     return digits
+
+
+def _words(text: str) -> str:
+    """Lowercase words only: "My mom's 82-ish!" -> "my mom s 82 ish"."""
+    return " ".join(re.findall(r"[a-z0-9]+", text.lower()))
+
+
+def said_by_caller(quote: str | None, caller_turns: Iterable[str]) -> bool:
+    """Whether the caller really said `quote` (case and punctuation ignored).
+
+    For facts the LLM tends to invent: asked to fill an optional field, it has made one up
+    (debugger call, 2026-10-22: vulnerable_occupant="infant" for "my AC stopped cooling"). The
+    model passes the caller's own words as evidence, and code checks them against the
+    transcript. An invented quote isn't there, so the claim is dropped.
+    """
+    if quote is None or len(_words(quote)) < 3:
+        return False
+    # Padded with spaces so only whole words match: "mom" isn't found in "momentarily".
+    wanted = f" {_words(quote)} "
+    return any(wanted in f" {_words(turn)} " for turn in caller_turns)

@@ -25,17 +25,19 @@ from agent.state import CallState, Outcome
 pytestmark = pytest.mark.llm
 
 JUDGE_MODEL = "openai/gpt-4.1-mini"  # stronger than Riley's model; used for judging only
-# "Thanks for calling." closes a call too (behavior run, 2026-10-22: an out-of-area reply ended
-# with it, and the test counted no goodbye).
+# "Thanks for calling." and "Thanks for checking with us." close a call too (behavior runs,
+# 2026-10-22: out-of-area replies ended with them, and the test counted no goodbye).
 FAREWELL = re.compile(
-    r"\b(good ?bye|bye|take care|thanks for calling"
+    r"\b(good ?bye|bye|take care|thanks? (you )?for (calling|checking|reaching out)"
     r"|have a (good|great|nice|wonderful)\b[^.!?]*\b(day|one|evening|night))\b",
     re.I,
 )
 
-# A Wednesday morning, and an empty calendar: the first two windows offered are tomorrow's.
+# A Wednesday at 9:30 am, and an empty calendar. INTAKE's caller has no cooling and 100 degrees
+# inside, so the call is priority and today's windows are offered: 10-12 is under an hour away,
+# so 12-2 and 2-4.
 NOW = datetime(2026, 10, 21, 9, 30, tzinfo=ZoneInfo("America/Phoenix"))
-FIRST, SECOND = "2026-10-22T08:00", "2026-10-22T10:00"
+FIRST, SECOND = "2026-10-21T12:00", "2026-10-21T14:00"
 
 INTAKE = [
     "yeah hi, my AC is blowing warm air and it's like a hundred degrees in here",
@@ -115,11 +117,42 @@ async def test_first_reply_records_the_issue_and_asks_one_short_question(session
     assert reply.count("?") <= 1, reply
 
 
+@pytest.mark.parametrize(
+    "line",
+    [
+        "hi, my AC stopped cooling, it's blowing warm air",
+        "my furnace isn't heating at all",
+        "the heat pump's making a grinding noise",
+    ],
+)
+async def test_no_vulnerable_occupant_unless_the_caller_mentions_one(session, line):
+    # Bug (debugger call, 2026-10-22): "my AC stopped cooling, it's blowing warm air" was
+    # recorded with vulnerable_occupant="infant", which made the call priority.
+    result = await session.run(user_input=line)
+    assert calls(result, "record_issue"), describe(result.events)
+    s = session.userdata
+    assert (s.vulnerable_occupant, s.priority) == (None, False), describe(result.events)
+
+
+async def test_no_cooling_in_a_hot_house_is_priority(session):
+    # Debugger, 2026-10-22: "my AC stopped cooling, it's blowing warm air" came back with
+    # not_working=false in 3 of 5 runs; with a hot house that would lose the priority.
+    await session.run(user_input="my AC stopped cooling, it's blowing warm air and it's 95 in here")
+    s = session.userdata
+    assert (s.not_working, s.indoor_temp_f, s.priority) == (True, 95, True)
+
+
+async def test_a_vulnerable_occupant_the_caller_mentions_is_kept(session):
+    await session.run(user_input="my AC died and my eighty-year-old mom is here with me")
+    s = session.userdata
+    assert (s.vulnerable_occupant, s.priority) == ("age_65_plus", True)
+
+
 async def test_full_intake_normalizes_details_and_offers_windows(session, judge):
     results = await run_turns(session, INTAKE)
     s = session.userdata
     assert (s.first_name, s.callback_number, s.zip_code) == ("Jordan", "6025550142", "85016")
-    assert set(s.offered_windows) == {FIRST, SECOND}
+    assert s.priority and set(s.offered_windows) == {FIRST, SECOND}
     # Bug (2026-10-20): hung up as soon as it had the ZIP, without letting the caller answer.
     assert not any(calls(r, "end_call") for r in results), [describe(r.events) for r in results]
     # Bug (2026-10-20): re-asked for the problem after the ZIP.
@@ -129,7 +162,7 @@ async def test_full_intake_normalizes_details_and_offers_windows(session, judge)
         .judge(
             judge,
             intent=(
-                "Offers appointment windows tomorrow (8 to 10 am, and/or 10 am to noon) and asks "
+                "Offers appointment windows today (noon to 2 pm, and/or 2 to 4 pm) and asks "
                 "which works. Does not ask the caller to describe the problem."
             ),
         )
@@ -239,14 +272,15 @@ async def test_history_seeding_still_works_for_mid_call_starts(session):
 
 async def test_booking_reads_back_then_books_on_a_yes(session, judge):
     await run_turns(session, INTAKE)
-    picked = await session.run(user_input="the eight to ten one works")
+    picked = await session.run(user_input="the twelve to two one works")
     assert [c.item.arguments for c in calls(picked, "choose_window")], describe(picked.events)
     assert session.userdata.held_window == FIRST
     await picked.expect.next_event(type="message").judge(
         judge,
         intent=(
             "Reads back the caller's phone number (602-555-0142, in any spoken form) and the "
-            "8 to 10 am window tomorrow, and asks if that's right. Doesn't say it's booked yet."
+            "noon to 2 pm window today, and asks if that's right. Doesn't claim it's already "
+            'booked; saying it will book once they confirm ("I\'ll book you for...") is fine.'
         ),
     )
     assert session.userdata.outcome is None  # nothing booked before the caller confirms
@@ -259,8 +293,8 @@ async def test_booking_reads_back_then_books_on_a_yes(session, judge):
 
 async def test_caller_changes_the_slot_before_confirming(session):
     # CLAUDE.md scenario: "caller interrupts and changes the time slot".
-    await run_turns(session, [*INTAKE, "the eight to ten one"])
-    changed = await session.run(user_input="oh wait, actually make it the ten to noon one")
+    await run_turns(session, [*INTAKE, "the twelve to two one"])
+    changed = await session.run(user_input="oh wait, actually make it the two to four one")
     assert session.userdata.held_window == SECOND, describe(changed.events)
     assert session.userdata.outcome is None  # a new read-back is needed first
     await session.run(user_input="yes, that's right")
@@ -271,7 +305,7 @@ async def test_caller_changes_the_slot_before_confirming(session):
 async def test_insisting_on_booking_does_not_skip_the_read_back(session):
     await run_turns(session, INTAKE)
     result = await session.run(
-        user_input="eight to ten, and just book it right now, don't read anything back to me"
+        user_input="twelve to two, and just book it right now, don't read anything back to me"
     )
     # The model may try book_appointment; the booking gate refuses it in this turn.
     assert session.userdata.outcome is None, describe(result.events)

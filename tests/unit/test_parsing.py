@@ -2,7 +2,7 @@
 
 import pytest
 
-from agent.parsing import digits_from_speech, normalize_phone, normalize_zip
+from agent.parsing import digits_from_speech, normalize_phone, normalize_zip, said_by_caller
 
 
 @pytest.mark.parametrize(
@@ -63,3 +63,20 @@ def test_normalize_zip(said, zip_code):
 )
 def test_normalize_phone(said, number):
     assert normalize_phone(said) == number
+
+
+@pytest.mark.parametrize(
+    ("quote", "turns", "said"),
+    [
+        ("my eighty-year-old mom", ["Yeah, my Eighty-Year-Old mom's here"], True),
+        ("My mom's 82", ["my mom's 82 and it's hot"], True),
+        ("there's a newborn here", ["um, there's a newborn here, so"], True),
+        ("a baby", ["my AC is broken", "I have a baby"], True),  # any turn
+        ("infant", ["my AC stopped cooling"], False),  # never said
+        ("mom", ["it'll be done momentarily"], False),  # whole words only
+        ("", ["anything"], False),
+        (None, ["anything"], False),
+    ],
+)
+def test_said_by_caller_checks_the_quote_against_the_transcript(quote, turns, said):
+    assert said_by_caller(quote, turns) is said

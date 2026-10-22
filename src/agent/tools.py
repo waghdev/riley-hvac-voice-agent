@@ -159,14 +159,14 @@ async def _calendar_call[T](context: RunContext[CallState], fn: Callable[..., T]
     return await task
 
 
-def _caller_turns(context: RunContext[CallState]) -> int:
-    """How many times the caller has spoken, this turn included: the SDK adds the caller's
-    message to the history before any tool in that turn runs (livekit-agents 1.8.8)."""
-    return sum(
-        1
+def _caller_said(context: RunContext[CallState]) -> list[str]:
+    """Everything the caller has said, this turn included: the SDK adds the caller's message to
+    the history before any tool in that turn runs (livekit-agents 1.8.8)."""
+    return [
+        item.text_content or ""
         for item in context.session.history.items
         if isinstance(item, ChatMessage) and item.role == "user"
-    )
+    ]
 
 
 def _formatted_number(digits: str) -> str:
@@ -269,7 +269,7 @@ async def _run(
     """Run one tool's logic. prepare: the tool's I/O, done first, its results passed to the
     logic. offer: filters for the windows if the logic says offer_windows."""
     state = context.userdata
-    state.caller_turns = _caller_turns(context)
+    state.caller_turns = len(_caller_said(context))
     name = logic.__name__
     # A safety report always goes through: the script matters more than anything else.
     if logic is not intake.report_safety_hazard:
@@ -330,8 +330,9 @@ async def record_issue(
     context: RunContext[CallState],
     category: Category,
     symptoms: str,
-    not_working: bool,
+    no_cooling_or_heat: bool,
     vulnerable_occupant: VulnerableOccupant | None = None,
+    vulnerable_occupant_words: str | None = None,
     indoor_temp_f: int | None = None,
     safety_signals: list[SafetySignal] | None = None,
 ) -> dict[str, Any] | None:
@@ -340,21 +341,33 @@ async def record_issue(
     Args:
         category: The service category that fits, from the list in your instructions.
         symptoms: The problem in a few words, in the caller's terms.
-        not_working: True only if the system gives no cooling or no heat at all.
+        no_cooling_or_heat: True if the system isn't cooling (or heating) the home at all,
+            even if it runs: "stopped cooling", "blowing warm air", "no heat". False for
+            noises, leaks, a blank thermostat, or weak but working cooling.
         vulnerable_occupant: Only if the caller says someone at home is 65 or older, an infant,
-            or has a medical condition made worse by heat.
+            or has a medical condition made worse by heat. Leave it out otherwise.
+        vulnerable_occupant_words: The caller's exact words that say so, copied from what they
+            said. Required with vulnerable_occupant; without them it isn't recorded.
         indoor_temp_f: The indoor temperature in Fahrenheit, only if the caller mentions it.
         safety_signals: Any hazard the caller mentions in the same breath.
     """
+    # The model has invented a vulnerable occupant to fill the optional field (debugger call,
+    # 2026-10-22), so intake.py checks the quoted words against what the caller really said.
+    if vulnerable_occupant is not None:
+        logger.info("vulnerable occupant claimed", extra={"occupant": vulnerable_occupant})
     return await _run(
         context,
         intake.record_issue,
         category=category,
         symptoms=symptoms,
-        not_working=not_working,
+        # Named for the model: as "not_working" it read an AC blowing warm air as working,
+        # because it runs, and lost the priority (behavior test, 2026-10-22).
+        not_working=no_cooling_or_heat,
         vulnerable_occupant=vulnerable_occupant,
+        vulnerable_occupant_words=vulnerable_occupant_words,
         indoor_temp_f=indoor_temp_f,
         safety_signals=safety_signals or [],
+        caller_said=_caller_said(context),
     )
 
 
