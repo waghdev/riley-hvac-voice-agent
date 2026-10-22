@@ -49,6 +49,10 @@ def test_number_words(n, words):
         ("at 4:30 pm", "at four thirty in the afternoon"),
         ("about 6:05 pm", "about six oh five in the evening"),
         ("10 am to 2 pm", "ten in the morning to two in the afternoon"),
+        # After "between", a dash is "and" (debugger call, 2026-10-22: the model wrote
+        # "tomorrow between 12-2 pm", and TTS said "between noon to two").
+        ("tomorrow between 12-2 pm", "tomorrow between noon and two in the afternoon"),
+        ("Between 10 am-12 pm?", "Between ten and noon?"),
         # Left alone: plain small numbers read fine, and words are never touched.
         ("about 2 minutes", "about 2 minutes"),
         ("one or two short sentences", "one or two short sentences"),
@@ -85,6 +89,20 @@ async def test_text_after_a_number_flows_again_once_the_sentence_ends():
     out = await collect(["It's $89. ", "The technician ", "will explain more."])
     assert "".join(out) == "It's eighty-nine dollars. The technician will explain more."
     assert out[0].startswith("It's eighty-nine dollars.")
+
+
+@pytest.mark.parametrize(
+    "chunks",
+    [
+        ["You're set for tomorrow between ", "12-2 pm. Anything else?"],
+        ["You're set for tomorrow between 12", "-2 pm. Anything else?"],
+        ["You're set for tomorrow betw", "een 12-2 pm. Anything else?"],
+    ],
+)
+async def test_between_reaches_the_time_range_across_chunks(chunks):
+    # "between" can arrive in an earlier chunk than the numbers; it must still make "and".
+    out = "".join(await collect(chunks))
+    assert out == "You're set for tomorrow between noon and two in the afternoon. Anything else?"
 
 
 async def test_a_trailing_number_is_flushed_at_the_end():

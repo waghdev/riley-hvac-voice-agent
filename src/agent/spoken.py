@@ -97,7 +97,10 @@ def _range(m: re.Match[str]) -> str:
     h1, m1, p1, joiner, h2, m2, p2 = m.groups()
     end_pm = _is_pm(p2)
     start_pm = _is_pm(p1) if p1 else end_pm  # "2-4 pm": the start shares the end's period
-    joiner = "and" if joiner.lower() == "and" else "to"
+    # "between 12-2 pm" is "between noon and two", not "between noon to two" (debugger call,
+    # 2026-10-22). The streamer keeps "between" in the same piece of text as the range.
+    after_between = m.string[: m.start()].rstrip().lower().endswith("between")
+    joiner = "and" if joiner.lower() == "and" or after_between else "to"
     start, end = _clock(h1, m1, start_pm), _clock(h2, m2, end_pm)
     if end in ("noon", "midnight") or start_pm == end_pm:
         # One part of day for the whole window: "ten to noon", "two to four in the afternoon".
@@ -134,22 +137,24 @@ _MAX_HOLD = 160  # characters; a safety valve so a sentence with no ending never
 def _split_ready(buffer: str) -> tuple[str, str]:
     """Split the buffer into text that's safe to convert and send now, and text to hold.
 
-    Text with no digits goes out right away (up to the last space, since a partial word could
-    still become "$8..."). From the first digit or "$", text is held to the end of the sentence,
-    so a number split across LLM chunks ("602-5" + "55-0142") is converted whole.
+    Text with no digits goes out right away, except its last word: a partial word could still
+    become "$8...", and a whole one ("between") can change how a number after it is said. From
+    the word before the first digit or "$", text is held to the end of the sentence, so a number
+    split across LLM chunks ("602-5" + "55-0142") is converted whole, with its lead-in word.
     """
     ready = ""
     while buffer:
         start = _NUMBER_START.search(buffer)
         if start is None:
-            cut = buffer.rfind(" ") + 1
+            cut = buffer.rstrip().rfind(" ") + 1
             return ready + buffer[:cut], buffer[cut:]
         end = _SENTENCE_END.search(buffer, start.start())
         if end is None:
             if len(buffer) - start.start() > _MAX_HOLD:
                 cut = buffer.rfind(" ") + 1
                 return ready + buffer[:cut], buffer[cut:]
-            return ready + buffer[: start.start()], buffer[start.start() :]
+            lead_in = buffer[: start.start()].rstrip().rfind(" ") + 1
+            return ready + buffer[:lead_in], buffer[lead_in:]
         ready += buffer[: end.end()]
         buffer = buffer[end.end() :]
     return ready, ""
