@@ -10,12 +10,14 @@
 tests/
 scripts/
 docs/
+mock_crm/
 CLAUDE.md
 PROGRESS.md
 
-# Local artifacts
+# Local artifacts (data/ holds local SQLite files; the container makes its own)
 .venv/
 metrics/
+data/
 voice-samples/
 __pycache__/
 *.py[cod]
