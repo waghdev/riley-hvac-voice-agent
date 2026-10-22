@@ -21,6 +21,31 @@ def load_business(path: Path = BUSINESS_YAML) -> dict[str, Any]:
 
 
 @dataclass(frozen=True)
+class BookingRules:
+    """When appointments can be booked; calendar.py applies these."""
+
+    days: tuple[str, ...]  # weekday names, lowercase
+    windows: tuple[tuple[str, str], ...]  # ("08:00", "10:00"), local time, earliest first
+    max_offered: int
+    per_window: int  # appointments each window can take
+    horizon_days: int
+    same_day_lead_minutes: int
+    same_day_for_priority_only: bool
+
+    @classmethod
+    def from_raw(cls, raw: Mapping[str, Any]) -> "BookingRules":
+        return cls(
+            days=tuple(raw["days"]),
+            windows=tuple((w["start"], w["end"]) for w in raw["windows"]),
+            max_offered=int(raw["max_windows_offered"]),
+            per_window=int(raw["appointments_per_window"]),
+            horizon_days=int(raw["horizon_days"]),
+            same_day_lead_minutes=int(raw["same_day_lead_minutes"]),
+            same_day_for_priority_only=bool(raw["same_day_for_priority_only"]),
+        )
+
+
+@dataclass(frozen=True)
 class BusinessConfig:
     """The facts the gates decide with, typed and read-only, built from business.yaml."""
 
@@ -38,6 +63,8 @@ class BusinessConfig:
     callback_number_digits: int
     callback_reasons: frozenset[str]
     callback_promise: str
+    timezone: str  # IANA name, e.g. America/Phoenix
+    booking: BookingRules
     max_attempts_per_field: int = 2  # CLAUDE.md section 4: after two misses, offer a callback
 
     @classmethod
@@ -57,6 +84,8 @@ class BusinessConfig:
             callback_number_digits=int(raw["readiness"]["callback_number_digits"]),
             callback_reasons=frozenset(raw["callback"]["reasons"]),
             callback_promise=raw["callback"]["promise"],
+            timezone=raw["business"]["timezone"],
+            booking=BookingRules.from_raw(raw["booking"]),
         )
 
 

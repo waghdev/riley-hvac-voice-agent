@@ -48,9 +48,12 @@ central Phoenix, no referral to other companies.
 
 - Monday to Saturday, appointment windows: 8–10 am, 10–12, 12–2 pm, 2–4 pm, 4–6 pm.
 - No Sunday appointments.
-- Offer at most two windows at a time, earliest first.
+- Two technicians, so each window takes at most 2 appointments.
+- Offer at most two windows at a time, earliest first, up to 6 days ahead.
+- Same-day windows are kept for priority calls, and must start at least 60 minutes from now.
 - Priority calls: offer the earliest window today if one exists, otherwise the earliest tomorrow, and say
   a dispatcher will call if an earlier slot opens.
+- Once booked, an appointment isn't changed on the same call; the caller can call back to change it.
 
 ## Urgency rule (`urgency_gate`)
 

@@ -80,6 +80,10 @@ booking:
     - {start: "14:00", end: "16:00"}
     - {start: "16:00", end: "18:00"}
   max_windows_offered: 2
+  appointments_per_window: 2  # two technicians
+  horizon_days: 6  # offer windows up to 6 days ahead, so a weekday name is never ambiguous
+  same_day_lead_minutes: 60  # a window today must start at least this far ahead
+  same_day_for_priority_only: true  # today's windows are kept for priority calls
   # Priority calls get the earliest window today, else the earliest tomorrow, and are
   # told a dispatcher will call if an earlier slot opens.
   priority_mentions_dispatcher_callback: true

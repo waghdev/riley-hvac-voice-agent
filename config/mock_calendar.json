@@ -1,0 +1,11 @@
+{
+  "about": "Mock calendar: appointments other customers already hold, as a weekly pattern (weekday -> window start -> count). Each window takes 2 (business.yaml booking.appointments_per_window). Mornings fill first, like a real HVAC schedule. Read by src/agent/calendar.py.",
+  "existing_appointments": {
+    "monday": {"08:00": 2, "10:00": 1, "14:00": 1},
+    "tuesday": {"08:00": 2, "10:00": 2, "12:00": 1},
+    "wednesday": {"08:00": 1, "12:00": 2},
+    "thursday": {"08:00": 2, "10:00": 1, "16:00": 1},
+    "friday": {"08:00": 2, "10:00": 2, "14:00": 1},
+    "saturday": {"08:00": 2, "10:00": 2, "12:00": 2, "14:00": 1}
+  }
+}
