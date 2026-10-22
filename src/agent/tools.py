@@ -8,6 +8,7 @@ logic against this call's CallState (the session's userdata), then:
 - returns the gate's decision, `say` and `next_step` for the LLM to follow.
 """
 
+import logging
 from typing import Any, Literal
 
 from livekit.agents import RunContext, function_tool
@@ -19,6 +20,8 @@ from agent.gates import GateResult
 from agent.state import CallState
 
 CONFIG = load_config()
+# Decisions and who ended the call are logged; what the caller said is not.
+logger = logging.getLogger("riley")
 
 # Enums in the tool schemas, built from business.yaml, so the LLM can't invent an id.
 Category = Literal[tuple(CONFIG.offered) + tuple(CONFIG.not_offered)]  # type: ignore[valid-type]
@@ -56,7 +59,13 @@ def _acknowledge(context: RunContext[CallState]) -> str | None:
     state.acknowledged = True
     line = prompts.ACKNOWLEDGEMENTS[state.acks_said % len(prompts.ACKNOWLEDGEMENTS)]
     state.acks_said += 1
-    context.session.say(line)
+    try:
+        context.session.say(line)
+    except RuntimeError:
+        # The session is already closing (cloud call, 2026-10-22: this raised and failed the
+        # tool). The acknowledgement is a nicety; the tool's result still matters.
+        logger.info("skipped acknowledgement: session closing")
+        return None
     return line
 
 
@@ -65,7 +74,11 @@ def _respond(context: RunContext[CallState], result: GateResult) -> dict[str, An
     if result.next_step == "say_exact_then_end_call":
         # Safety is enforced in code: the exact script, uninterruptible, then hang up. Returning
         # None means no LLM reply, so nothing can soften or reword it.
-        handle = session.say(CONFIG.safety_script, allow_interruptions=False)
+        logger.info("hanging up", extra={"by": "safety_script"})
+        try:
+            handle = session.say(CONFIG.safety_script, allow_interruptions=False)
+        except RuntimeError:  # already closing: nothing more can be said
+            return None
         handle.add_done_callback(lambda _: session.shutdown())
         return None
     said = _acknowledge(context)
@@ -78,6 +91,7 @@ def _respond(context: RunContext[CallState], result: GateResult) -> dict[str, An
         # A gate ended the call, so code hangs up, not the LLM: once Riley's reply to this result
         # has played, the session closes. Leaving it to end_call gave two goodbyes, or none and
         # an open line (behavior tests, 2026-10-21). LiveKit's EndCallTool uses the same hook.
+        logger.info("hanging up", extra={"by": "gate", "decision": result.decision.value})
         context.speech_handle.add_done_callback(lambda _: session.shutdown())
         out["say"] = (
             f"{result.say} Then say a short goodbye. The call ends by itself after your reply; "
@@ -86,6 +100,11 @@ def _respond(context: RunContext[CallState], result: GateResult) -> dict[str, An
     if state.callback_number:
         out["callback_number_on_file"] = _formatted_number(state.callback_number)  # for read-back
     return out
+
+
+async def end_call_requested(ev: Toolset.ToolCalledEvent) -> None:
+    """EndCallTool hook: log that the model ended the call (the caller said they were done)."""
+    logger.info("hanging up", extra={"by": "end_call"})
 
 
 async def no_second_goodbye(ev: Toolset.ToolCompletedEvent) -> None:
@@ -99,7 +118,16 @@ def _run(context: RunContext[CallState], logic, **kwargs) -> dict[str, Any] | No
     try:
         result = logic(context.userdata, CONFIG, **kwargs)
     except ValueError as e:  # an id the schema should have prevented; let the LLM correct it
+        logger.info("tool rejected", extra={"tool": logic.__name__, "error": str(e)})
         raise ToolError(str(e)) from e
+    logger.info(
+        "tool decision",
+        extra={
+            "tool": logic.__name__,
+            "decision": result.decision.value,
+            "next_step": result.next_step,
+        },
+    )
     return _respond(context, result)
 
 

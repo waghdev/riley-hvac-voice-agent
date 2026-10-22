@@ -121,6 +121,7 @@ class Riley(Agent):
                     ignore_on_enter=True,
                     delete_room=False,
                     end_instructions=prompts.END_CALL_RESULT,
+                    on_tool_called=tools.end_call_requested,
                     on_tool_completed=tools.no_second_goodbye,
                 ),
             ],
@@ -180,16 +181,20 @@ async def entrypoint(ctx: JobContext) -> None:
     pairer = TurnPairer(call_id=call_id, channel=channel, session_started_at=time.time())
     writer = JsonlWriter(METRICS_DIR)
 
-    async def end_with(line: str) -> None:
+    async def end_with(line: str, by: str) -> None:
         """Say a final line nobody can talk over, then close the session (see finish_call)."""
+        logger.info("hanging up", extra={"by": by})
         session.interrupt()
-        await session.say(line, allow_interruptions=False)
+        try:
+            await session.say(line, allow_interruptions=False)
+        except RuntimeError:  # already closing for another reason
+            return
         session.shutdown()
 
     # --- Silence: two check-ins, then a polite close ------------------------------------
     silence = SilenceMonitor(
         say=lambda line: session.say(line),  # a SpeechHandle resolves when playout ends
-        close=end_with,
+        close=lambda line: end_with(line, by="silence"),
         wait_seconds=SILENCE_SECONDS,
         prompts=SILENCE_PROMPTS,
         still_there=prompts.STILL_THERE,
@@ -224,7 +229,7 @@ async def entrypoint(ctx: JobContext) -> None:
     # --- Maximum call length, to protect the free quotas --------------------------------
     async def time_limit() -> None:
         await asyncio.sleep(MAX_CALL_SECONDS)
-        await end_with(prompts.TIME_LIMIT_GOODBYE)
+        await end_with(prompts.TIME_LIMIT_GOODBYE, by="time_limit")
 
     limit_task: asyncio.Task[None] | None = None
     background: BackgroundAudioPlayer | None = None
@@ -259,7 +264,11 @@ async def entrypoint(ctx: JobContext) -> None:
         # Every call ends in exactly one outcome; a call no gate settled is incomplete.
         if state.outcome is None:
             state.outcome = Outcome.INCOMPLETE
-        logger.info("call outcome", extra={"outcome": state.outcome.value})
+        # user_initiated: our code or end_call closed it ("hanging up" logs say which);
+        # participant_disconnected: the caller hung up.
+        logger.info(
+            "call outcome", extra={"outcome": state.outcome.value, "close_reason": str(ev.reason)}
+        )
         finishing = asyncio.create_task(finish_call(f"session closed: {ev.reason}"))
 
     await session.start(
