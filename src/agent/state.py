@@ -18,6 +18,15 @@ class Outcome(StrEnum):
     INCOMPLETE = "incomplete"
 
 
+@dataclass(frozen=True)
+class ReadBack:
+    """What Riley read back before booking, and when: a booking needs the caller's answer to it."""
+
+    callback_number: str
+    window_id: str
+    turn: int  # caller turns so far when it was read back; the caller's yes comes in a later one
+
+
 @dataclass
 class CallState:
     call_id: str
@@ -30,14 +39,31 @@ class CallState:
     indoor_temp_f: int | None = None  # only if the caller mentioned it
     vulnerable_occupant: str | None = None  # one of business.yaml urgency.vulnerable_occupants
     safety_signals: set[str] = field(default_factory=set)  # ids from business.yaml safety.signals
-    priority: bool = False  # set by the urgency gate; M3's booking offers the earliest window
+    priority: bool = False  # set by the urgency gate; priority calls may book today's windows
     failed_attempts: dict[str, int] = field(default_factory=dict)  # field -> misses so far
     callback_reason: str | None = None
+    # Booking. offered_windows: every window offered on this call, id -> how Riley says it
+    # ("tomorrow, 8-10 am"); choose_window only accepts these ids. held_window: the one the
+    # caller picked. read_back: what Riley read back for the caller to confirm.
+    offered_windows: dict[str, str] = field(default_factory=dict)
+    held_window: str | None = None
+    read_back: ReadBack | None = None
+    booking_id: str | None = None
     outcome: Outcome | None = None
     # Conversation control, not business facts. `expecting`: the detail Riley just asked for, so
     # endpointing can be shortened for short answers (a name, a number, a ZIP). `acknowledged`:
     # whether this caller turn already got a spoken "Got it." (main.py resets it each turn);
-    # `acks_said` rotates the wording.
+    # `acks_said` rotates the wording, and `ack_line` is what this turn's was (None if it
+    # couldn't be said). `caller_turns`: how many times the caller has spoken, set by tools.py
+    # from the session history before each tool runs.
     expecting: str | None = None
     acknowledged: bool = False
     acks_said: int = 0
+    ack_line: str | None = None
+    caller_turns: int = 0
+
+    @property
+    def closing(self) -> bool:
+        """A gate or the safety script ended the call and code is hanging up. A booked call
+        isn't closing: Riley still asks if there's anything else."""
+        return self.outcome is not None and self.outcome is not Outcome.BOOKED

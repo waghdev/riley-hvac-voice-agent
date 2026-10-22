@@ -7,12 +7,18 @@ the call outcome when a gate ends the call, and returns the GateResult Riley fol
 Invalid ids raise ValueError; tools.py turns that into a ToolError the LLM can correct.
 """
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
+from dataclasses import replace
+from datetime import date
 
+from agent.calendar import Booking, Window
 from agent.config import BusinessConfig
 from agent.gates import (
     Decision,
     GateResult,
+    booked,
+    booking_gate,
+    calendar_down,
     callback_gate,
     failed_attempt_gate,
     readiness_gate,
@@ -21,9 +27,11 @@ from agent.gates import (
     service_offered_gate,
     terminal_outcome,
     urgency_gate,
+    window_taken,
+    windows_gate,
 )
 from agent.parsing import normalize_phone, normalize_zip
-from agent.state import CallState, Outcome
+from agent.state import CallState, Outcome, ReadBack
 
 # NOT_BOOKABLE carries the reason it can't be booked; each maps to the call's outcome.
 _NOT_BOOKABLE_OUTCOMES = {
@@ -58,6 +66,10 @@ def _settle(state: CallState, result: GateResult) -> GateResult:
     state.expecting = (
         result.next_step.removeprefix("ask:") if result.next_step.startswith("ask:") else None
     )
+    if result.decision is Decision.READ_BACK and state.callback_number and state.held_window:
+        # Riley's reply to this result is the read-back, so the caller's answer comes in a
+        # later turn; booking_gate waits for it.
+        state.read_back = ReadBack(state.callback_number, state.held_window, state.caller_turns)
     return result
 
 
@@ -67,13 +79,17 @@ def _miss(state: CallState, field: str, cfg: BusinessConfig) -> GateResult:
 
 
 def _next(state: CallState, cfg: BusinessConfig) -> GateResult:
-    """After any new fact: safety first, then whatever readiness says is next."""
+    """After any new fact: safety first, then whatever readiness says is next. Once a window is
+    held, that's the booking gate: a changed number gets read back again."""
     if state.callback_reason is not None:
         safety = safety_gate(state, cfg)
         if safety.decision is Decision.SAFETY_REDIRECT:
             return _settle(state, safety)
         return _settle(state, callback_gate(state, cfg))
-    return _settle(state, readiness_gate(state, cfg))
+    ready = readiness_gate(state, cfg)
+    if ready.decision is Decision.READY_TO_BOOK and state.held_window is not None:
+        return _settle(state, booking_gate(state, cfg))
+    return _settle(state, ready)
 
 
 def record_caller_details(
@@ -168,3 +184,60 @@ def request_callback(
 ) -> GateResult:
     state.callback_reason = reason if reason in cfg.callback_reasons else "other"
     return record_caller_details(state, cfg, first_name=first_name, callback_number=callback_number)
+
+
+# --- Booking. tools.py does the calendar I/O and passes in what it found; these decide. --------
+
+
+def offer_windows(
+    state: CallState,
+    cfg: BusinessConfig,
+    windows: Sequence[Window],
+    asked: str,
+    today: date,
+    lead_in: str = "",
+) -> GateResult:
+    """Offer the windows calendar.pick_windows found. `lead_in` goes first: a priority note, or
+    "that window was just taken"."""
+    for w in windows:
+        state.offered_windows[w.id] = w.when(today)
+    result = windows_gate(state, cfg, found=len(windows), asked=asked)
+    return _settle(state, replace(result, say=f"{lead_in} {result.say}".strip()))
+
+
+def calendar_unavailable(state: CallState, cfg: BusinessConfig) -> GateResult:
+    """The calendar failed: offer a callback instead of leaving the caller stuck."""
+    return _settle(state, calendar_down())
+
+
+def find_windows(state: CallState, cfg: BusinessConfig) -> GateResult:
+    """The caller wants another day or time: let go of any held window and offer again."""
+    state.held_window = None
+    return _next(state, cfg)
+
+
+def choose_window(
+    state: CallState, cfg: BusinessConfig, window_id: str, still_open: bool
+) -> GateResult:
+    """Hold the window the caller picked; booking_gate then asks for the read-back."""
+    if window_id not in state.offered_windows:
+        raise ValueError(f"unknown window_id {window_id!r}; use the id of a window you offered")
+    if not still_open:
+        state.held_window = None
+        return _settle(state, window_taken(window_id))
+    state.held_window = window_id
+    return _next(state, cfg)
+
+
+def book_appointment(state: CallState, cfg: BusinessConfig, booking: Booking | None) -> GateResult:
+    """The result of a booking attempt. tools.py only calls the calendar when booking_gate says
+    CONFIRMED; `booking` is None if it didn't, or if the window was taken meanwhile."""
+    gate = booking_gate(state, cfg)
+    if gate.decision is not Decision.CONFIRMED:
+        return _settle(state, gate)
+    if booking is None:
+        taken = state.held_window or ""
+        state.held_window = None
+        return _settle(state, window_taken(taken))
+    state.booking_id = booking.booking_id
+    return _settle(state, booked(state))

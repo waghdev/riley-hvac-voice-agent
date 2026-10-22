@@ -5,9 +5,12 @@ GateResult that a tool hands back to the LLM: `say` is a short instruction for R
 `next_step` tells her (and main.py) what comes next. No LiveKit, no network, no LLM.
 
 next_step values:
-    continue                  carry on collecting details
+    continue                  carry on (collecting details, or after booking)
     ask:<field>               ask for that field next (main.py shortens endpointing for it)
-    offer_windows             everything checks out; move to scheduling
+    offer_windows             details complete: tools.py finds open windows and offers them,
+                              which turns this into choose_window (never reaches the LLM)
+    choose_window             offer the windows in the tool result; the caller picks one
+    confirm_booking           the read-back is out; book once the caller confirms it
     take_callback_details     switch to taking a callback request
     end_call                  the call is over: say what `say` asks and one goodbye; tools.py
                               hangs up after that reply (so `say` never adds a goodbye itself)
@@ -37,6 +40,16 @@ class Decision(StrEnum):
     ASK_AGAIN = "ASK_AGAIN"
     OFFER_CALLBACK = "OFFER_CALLBACK"
     CALLBACK_READY = "CALLBACK_READY"
+    # Booking (M3)
+    OFFER_WINDOWS = "OFFER_WINDOWS"
+    NO_WINDOWS = "NO_WINDOWS"
+    WINDOW_TAKEN = "WINDOW_TAKEN"
+    NO_WINDOW_CHOSEN = "NO_WINDOW_CHOSEN"
+    READ_BACK = "READ_BACK"
+    AWAITING_CONFIRMATION = "AWAITING_CONFIRMATION"
+    CONFIRMED = "CONFIRMED"
+    BOOKED = "BOOKED"
+    ALREADY_BOOKED = "ALREADY_BOOKED"
 
 
 @dataclass(frozen=True)
@@ -69,6 +82,7 @@ _TERMINAL = {
     Decision.OUT_OF_AREA: Outcome.OUT_OF_AREA,
     Decision.NOT_OFFERED: Outcome.NOT_OFFERED,
     Decision.CALLBACK_READY: Outcome.CALLBACK_REQUESTED,
+    Decision.BOOKED: Outcome.BOOKED,
 }
 
 
@@ -184,11 +198,10 @@ def readiness_gate(state: CallState, cfg: BusinessConfig) -> GateResult:
             say=f"Ask for their {FIELD_LABELS[missing[0]]}.",
             next_step=f"ask:{missing[0]}",
         )
+    # Nothing to say yet: tools.py adds the open windows, and the number is read back with the
+    # chosen window (booking_gate).
     return GateResult(
-        Decision.READY_TO_BOOK,
-        reason="all_required_fields",
-        say="Read back the callback number to confirm it, then move on to scheduling.",
-        next_step="offer_windows",
+        Decision.READY_TO_BOOK, reason="all_required_fields", say="", next_step="offer_windows"
     )
 
 
@@ -239,4 +252,141 @@ def callback_gate(state: CallState, cfg: BusinessConfig) -> GateResult:
         reason=f"callback:{state.callback_reason or 'other'}",
         say=f"Read back the callback number, then tell them {cfg.callback_promise}.",
         next_step="end_call",
+    )
+
+
+# --- Booking ---------------------------------------------------------------------------------
+
+
+def windows_gate(state: CallState, cfg: BusinessConfig, *, found: int, asked: str) -> GateResult:
+    """What to tell the caller about the windows calendar.pick_windows found.
+
+    asked: "first" (the first offer), "matching" (a day or time the caller named), "alternatives"
+    (nothing matched, so these are the earliest instead), "later" (later than what was offered).
+    """
+    if found:
+        if asked == "alternatives":
+            say = "Tell them nothing's open then, and offer these windows instead, earliest first."
+        else:
+            say = "Offer these windows, earliest first, and ask which works."
+        if state.priority and asked == "first":
+            say += " Mention that a dispatcher will call if an earlier slot opens."
+        return GateResult(
+            Decision.OFFER_WINDOWS,
+            reason=f"windows:{asked}:{found}",
+            say=say,
+            next_step="choose_window",
+        )
+    if asked == "later":
+        return GateResult(
+            Decision.NO_WINDOWS,
+            reason="none_later",
+            say="Tell them nothing later is open this week, and ask which offered window works.",
+            next_step="choose_window",
+        )
+    return GateResult(
+        Decision.NO_WINDOWS,
+        reason="schedule_full",
+        say=(
+            "Apologize that the schedule is full for the next few days, and offer to have a "
+            "team member call back to find a time."
+        ),
+        next_step="take_callback_details",
+    )
+
+
+def calendar_down() -> GateResult:
+    """The calendar couldn't be reached: don't leave the caller stuck, take a callback."""
+    return GateResult(
+        Decision.NO_WINDOWS,
+        reason="calendar_unavailable",
+        say=(
+            "Apologize that you can't reach the schedule right now, and offer to have a team "
+            "member call back to book."
+        ),
+        next_step="take_callback_details",
+    )
+
+
+def window_taken(window_id: str) -> GateResult:
+    """Someone else took the window while the caller was deciding; tools.py offers others."""
+    return GateResult(
+        Decision.WINDOW_TAKEN,
+        reason=f"window_taken:{window_id}",
+        say="Tell them that window was just taken.",
+        next_step="offer_windows",
+    )
+
+
+def booking_gate(state: CallState, cfg: BusinessConfig) -> GateResult:
+    """May we book now? Only when the details are complete and eligible, a window is held, and
+    the caller has answered a read-back of exactly this number and window (CLAUDE.md section 4).
+
+    Code checks that the read-back happened and that the caller spoke after it; whether they
+    said yes is the LLM's call (it extracts, code decides). book_appointment refuses unless this
+    returns CONFIRMED, so a confused or manipulated LLM can't book without a read-back.
+    """
+    ready = readiness_gate(state, cfg)
+    if ready.decision is not Decision.READY_TO_BOOK:
+        return ready
+    window = state.held_window
+    if window is None:
+        return GateResult(
+            Decision.NO_WINDOW_CHOSEN,
+            reason="no_window_chosen",
+            say="Ask which of the offered windows works for them.",
+            next_step="choose_window",
+        )
+    rb = state.read_back
+    if rb is None or (rb.callback_number, rb.window_id) != (state.callback_number, window):
+        number = state.callback_number or ""
+        return GateResult(
+            Decision.READ_BACK,
+            reason=f"read_back:{window}",
+            say=(
+                f"Read back their callback number, {number[:3]}-{number[3:6]}-{number[6:]}, and "
+                f"the window, {state.offered_windows[window]}, and ask if that's all right."
+            ),
+            next_step="confirm_booking",
+        )
+    if state.caller_turns <= rb.turn:
+        return GateResult(
+            Decision.AWAITING_CONFIRMATION,
+            reason="read_back_unanswered",
+            say=(
+                "Don't book yet. Read back the number and window if you haven't, and wait for "
+                "the caller to confirm."
+            ),
+            next_step="confirm_booking",
+        )
+    return GateResult(
+        Decision.CONFIRMED,
+        reason=f"confirmed:{window}",
+        say="If they said the number and window are right, book it; if not, ask what to change.",
+        next_step="confirm_booking",
+    )
+
+
+def booked(state: CallState) -> GateResult:
+    """The booking went through."""
+    window = state.offered_windows.get(state.held_window or "", "that window")
+    return GateResult(
+        Decision.BOOKED,
+        reason=f"booked:{state.held_window}",
+        say=f"Tell them they're booked for {window}, then ask if there's anything else.",
+        next_step="continue",
+    )
+
+
+def already_booked(state: CallState) -> GateResult:
+    """After booking, nothing on this call changes it (business.md)."""
+    window = state.offered_windows.get(state.held_window or "", "the time they chose")
+    return GateResult(
+        Decision.ALREADY_BOOKED,
+        reason="already_booked",
+        say=(
+            f"They're booked for {window}, and it can't be changed on this call. If they need "
+            "a change, they can call back anytime."
+        ),
+        next_step="continue",
     )
