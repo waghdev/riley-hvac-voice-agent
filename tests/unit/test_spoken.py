@@ -90,3 +90,25 @@ async def test_text_after_a_number_flows_again_once_the_sentence_ends():
 async def test_a_trailing_number_is_flushed_at_the_end():
     out = await collect(["Your ZIP is 8501", "6"])
     assert "".join(out) == "Your ZIP is eight five oh one six"
+
+
+@pytest.mark.parametrize(
+    ("hour", "spoken"),
+    [
+        (8, "Thursday, eight to ten in the morning"),
+        (10, "Thursday, ten to noon"),
+        (12, "Thursday, noon to two in the afternoon"),
+        (14, "Thursday, two to four in the afternoon"),
+        (16, "Thursday, four to six in the evening"),
+    ],
+)
+def test_every_booking_window_is_spoken_naturally(hour, spoken):
+    # The labels calendar.py writes for the LLM, as TTS will say them.
+    from datetime import date, datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    from agent.calendar import Window
+
+    start = datetime(2026, 10, 22, hour, tzinfo=ZoneInfo("America/Phoenix"))  # a Thursday
+    label = Window(start, start + timedelta(hours=2)).when(date(2026, 10, 19))
+    assert speak_numbers(label) == spoken

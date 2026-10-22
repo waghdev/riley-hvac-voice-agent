@@ -79,6 +79,11 @@ AMBIENT_VOLUME = float(os.getenv("AMBIENT_VOLUME", "3.5"))
 # 0 disables typing.
 THINKING_VOLUME = float(os.getenv("THINKING_VOLUME", "0.5"))
 BACKGROUND_CLOSE_SECONDS = 2.0  # bound on closing the background-audio player at hang-up
+# After the caller is gone: how long CRM deliveries still in flight get to finish. Under the
+# ~10 s LiveKit gives a job to shut down before killing it (livekit-agents 1.8.8,
+# shutdown_process_timeout). Usually nothing is left: a lead goes out the moment it's booked.
+# Anything cut off stays pending in the outbox for scripts/redeliver_outbox.py.
+LEAD_DRAIN_SECONDS = 7.0
 SILENCE_SECONDS = 7.0  # caller silent this long -> "Are you still there?" (CLAUDE.md section 4)
 SILENCE_PROMPTS = 2  # unanswered check-ins before a polite close
 
@@ -256,6 +261,13 @@ async def entrypoint(ctx: JobContext) -> None:
                 logger.warning("background audio didn't close cleanly", exc_info=True)
         await ctx.delete_room()  # a no-op with a warning in console mode
         ctx.shutdown(reason=reason)
+
+    async def drain_leads() -> None:
+        # A shutdown callback, not a step in finish_call: deleting the room starts the job's
+        # shutdown by itself, and only shutdown callbacks are awaited before the process ends.
+        await tools.drain_leads(LEAD_DRAIN_SECONDS)
+
+    ctx.add_shutdown_callback(drain_leads)
 
     @session.on("close")
     def _on_close(ev: CloseEvent) -> None:

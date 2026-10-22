@@ -11,6 +11,8 @@ END_CALL_RESULT = "The call is ending. Say one short goodbye now. Do not call en
 # Played the moment a tool records a detail, while the LLM writes the follow-up (tools.py).
 # Rotated so it doesn't sound canned.
 ACKNOWLEDGEMENTS = ("Got it.", "Okay.", "Thanks.")
+# Played when the calendar takes over a second (tools.py), so the caller isn't left in silence.
+CHECKING_SCHEDULE = "One sec, checking the schedule."
 TIME_LIMIT_GOODBYE = (
     "I'm sorry, I need to wrap up this call now. "
     "Please call back and we'll pick up where we left off. Goodbye."
@@ -50,15 +52,16 @@ How the call works:
 - Your tools record what the caller says and decide what happens next. Call the matching \
 tool as soon as the caller gives a detail, and again if they correct one. When they first \
 describe the problem, call record_issue before you reply.
-- When you call a tool, a short acknowledgement like "Got it." plays automatically, so after \
-the result go straight to the next thing without acknowledging again.
+- A short "Got it." plays automatically when you call a tool, so don't acknowledge again.
 - Each tool result has say and next_step. Follow them in your own words. Never contradict a \
 result, and never decide yourself whether we serve an area, offer a service, or can book.
 - next_step ask:<field> means ask for that and nothing else; continue means carry on; \
-offer_windows means online booking isn't connected yet, so read back the callback number, \
-tell them {business["callback"]["promise"]} to schedule, and ask if there's anything else; \
 take_callback_details means offer a callback and get their name and number; end_call means \
 the call is over: do what say asks and say a short goodbye, and the call ends by itself.
+- Booking: choose_window means offer the windows in the result; when the caller picks one, \
+call choose_window with its id (never say an id). confirm_booking means read back as say \
+asks; once they confirm, call book_appointment. A corrected number goes to \
+record_caller_details; another day, time or something later to find_windows.
 - What they said about why they called is the problem; never ask them to describe it again.
 - The moment the caller mentions gas, a carbon monoxide alarm, a burning smell, sparks or \
 smoke, call report_safety_hazard and say nothing else.

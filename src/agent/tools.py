@@ -5,21 +5,34 @@ logic against this call's CallState (the session's userdata), then:
 - enforces safety in code: on a hazard it plays the exact safety script and hangs up, with no LLM
   reply to paraphrase it;
 - shortens endpointing when Riley's next question has a short answer (name, number, ZIP);
+- does the calendar I/O for booking (off the event loop, with a filler line if it's slow);
+- hands booked and callback leads to the CRM sender, which delivers them in the background;
 - returns the gate's decision, `say` and `next_step` for the LLM to follow.
 """
 
+import asyncio
+import functools
 import logging
+import os
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 from typing import Any, Literal
+from zoneinfo import ZoneInfo
 
 from livekit.agents import RunContext, function_tool
-from livekit.agents.llm import ToolError, Toolset
+from livekit.agents.llm import ChatMessage, ToolError, Toolset
 
-from agent import intake, prompts
-from agent.config import load_config
-from agent.gates import GateResult
-from agent.state import CallState
+from agent import calendar, gates, intake, prompts
+from agent.calendar import Calendar
+from agent.config import REPO_ROOT, load_config
+from agent.crm_client import CrmClient, LeadSender, Outbox, build_lead
+from agent.gates import Decision, GateResult
+from agent.state import CallState, Outcome
 
 CONFIG = load_config()
+TZ = ZoneInfo(CONFIG.timezone)
 # Decisions and who ended the call are logged; what the caller said is not.
 logger = logging.getLogger("riley")
 
@@ -28,6 +41,8 @@ Category = Literal[tuple(CONFIG.offered) + tuple(CONFIG.not_offered)]  # type: i
 SafetySignal = Literal[tuple(sorted(CONFIG.safety_signals))]  # type: ignore[valid-type]
 VulnerableOccupant = Literal[tuple(sorted(CONFIG.vulnerable_occupants))]  # type: ignore[valid-type]
 CallbackReason = Literal[tuple(sorted(CONFIG.callback_reasons))]  # type: ignore[valid-type]
+Day = Literal[("today", "tomorrow", *CONFIG.booking.days)]  # type: ignore[valid-type]
+PartOfDay = Literal[tuple(calendar.PARTS_OF_DAY)]  # type: ignore[valid-type]
 
 # Endpointing: how long the turn detector may wait when it isn't sure the caller has finished.
 # After a name or digits it often isn't, so it waited the full 2.5 s on 5 of 14 cloud turns.
@@ -42,6 +57,10 @@ DEFAULT_MIN_DELAY = 0.3  # the audio turn detector's documented default
 DIGITS_MIN_DELAY = 0.6
 DIGIT_FIELDS = frozenset({"callback_number", "zip_code"})
 
+# A calendar call slower than this gets the filler line (CLAUDE.md section 4: "more than about
+# a second"). The acknowledgement has already covered the first moment.
+FILLER_AFTER_SECONDS = 1.0
+
 
 def endpointing_for(state: CallState) -> dict[str, float]:
     short = state.expecting in SHORT_ANSWER_FIELDS
@@ -52,11 +71,68 @@ def endpointing_for(state: CallState) -> dict[str, float]:
     }
 
 
-def _formatted_number(digits: str) -> str:
-    return f"{digits[:3]}-{digits[3:6]}-{digits[6:]}"
+# --- Backends: the calendar and the CRM, one set per worker process ---------------------------
 
 
-def _acknowledge(context: RunContext[CallState]) -> str | None:
+@dataclass
+class Backends:
+    calendar: Calendar
+    leads: LeadSender
+
+
+_backends: Backends | None = None
+
+
+def backends() -> Backends:
+    """Created on first use, from the environment (main.py loads .env first):
+    DATA_DIR       where the SQLite files live (default: data/ in the repo)
+    MOCK_CRM_URL   the CRM; unset means leads wait in the outbox (the deployed demo)
+    CALENDAR_DELAY_SECONDS  demo switch: a slow calendar, to hear the filler line
+    Tests replace _backends with temporary ones."""
+    global _backends
+    if _backends is None:
+        data = Path(os.getenv("DATA_DIR", REPO_ROOT / "data"))
+        _backends = Backends(
+            calendar=Calendar(
+                data / "calendar.sqlite3",
+                CONFIG.booking,
+                calendar.load_existing(),
+                delay_seconds=float(os.getenv("CALENDAR_DELAY_SECONDS", "0")),
+            ),
+            leads=LeadSender(
+                CrmClient(os.getenv("MOCK_CRM_URL") or None, Outbox(data / "outbox.sqlite3"))
+            ),
+        )
+    return _backends
+
+
+async def drain_leads(timeout: float) -> None:
+    """At hang-up: give background CRM deliveries a bounded time to finish (main.py)."""
+    if _backends is not None:
+        await _backends.leads.drain(timeout)
+
+
+def now() -> datetime:
+    """The business's local time. A function so tests can pin the clock."""
+    return datetime.now(TZ)
+
+
+# --- Speaking from inside a tool ------------------------------------------------------------
+
+
+def _say(context: RunContext[CallState], line: str, what: str) -> bool:
+    """Say a fixed line now, without waiting for it to play. False if the session is closing."""
+    try:
+        context.session.say(line)
+    except RuntimeError:
+        # The session is already closing (cloud call, 2026-10-22: this raised and failed the
+        # tool). These lines are niceties; the tool's result still matters.
+        logger.info(f"skipped {what}: session closing")
+        return False
+    return True
+
+
+def _acknowledge(context: RunContext[CallState]) -> None:
     """Say "Got it." now, once per caller turn, while the LLM writes the follow-up.
 
     A tool turn needs two LLM round trips (one to call the tool, one to reply) before any audio,
@@ -65,18 +141,39 @@ def _acknowledge(context: RunContext[CallState]) -> str | None:
     """
     state = context.userdata
     if state.acknowledged:
-        return None
+        return
     state.acknowledged = True
     line = prompts.ACKNOWLEDGEMENTS[state.acks_said % len(prompts.ACKNOWLEDGEMENTS)]
     state.acks_said += 1
-    try:
-        context.session.say(line)
-    except RuntimeError:
-        # The session is already closing (cloud call, 2026-10-22: this raised and failed the
-        # tool). The acknowledgement is a nicety; the tool's result still matters.
-        logger.info("skipped acknowledgement: session closing")
-        return None
-    return line
+    state.ack_line = line if _say(context, line, "acknowledgement") else None
+
+
+async def _calendar_call[T](context: RunContext[CallState], fn: Callable[..., T], *args: Any) -> T:
+    """Run a calendar call off the event loop: SQLite blocks, and a blocked loop would stall the
+    call's audio. If it's slow, Riley says the filler line so the caller isn't left in silence."""
+    _acknowledge(context)
+    task = asyncio.ensure_future(asyncio.to_thread(fn, *args))
+    done, _ = await asyncio.wait({task}, timeout=FILLER_AFTER_SECONDS)
+    if not done:
+        _say(context, prompts.CHECKING_SCHEDULE, "filler line")
+    return await task
+
+
+def _caller_turns(context: RunContext[CallState]) -> int:
+    """How many times the caller has spoken, this turn included: the SDK adds the caller's
+    message to the history before any tool in that turn runs (livekit-agents 1.8.8)."""
+    return sum(
+        1
+        for item in context.session.history.items
+        if isinstance(item, ChatMessage) and item.role == "user"
+    )
+
+
+def _formatted_number(digits: str) -> str:
+    return f"{digits[:3]}-{digits[3:6]}-{digits[6:]}"
+
+
+# --- From a decision to the tool's result -----------------------------------------------------
 
 
 def _respond(context: RunContext[CallState], result: GateResult) -> dict[str, Any] | None:
@@ -91,12 +188,12 @@ def _respond(context: RunContext[CallState], result: GateResult) -> dict[str, An
             return None
         handle.add_done_callback(lambda _: session.shutdown())
         return None
-    said = _acknowledge(context)
+    _acknowledge(context)
     session.update_options(endpointing_opts=endpointing_for(state))
     out: dict[str, Any] = result.to_tool_output()
-    if said:
+    if state.ack_line:
         # Right next to the reply being written, so the model doesn't open with another "Thanks."
-        out["you_just_said"] = f"{said} (already spoken; don't acknowledge again)"
+        out["you_just_said"] = f"{state.ack_line} (already spoken; don't acknowledge again)"
     if result.next_step == "end_call":
         # A gate ended the call, so code hangs up, not the LLM: once Riley's reply to this result
         # has played, the session closes. Leaving it to end_call gave two goodbyes, or none and
@@ -112,6 +209,106 @@ def _respond(context: RunContext[CallState], result: GateResult) -> dict[str, An
     return out
 
 
+async def _offer(
+    context: RunContext[CallState],
+    lead_in: GateResult,
+    *,
+    day: str | None = None,
+    part_of_day: str | None = None,
+    later: bool = False,
+) -> dict[str, Any] | None:
+    """Find open windows and offer up to two. lead_in's `say` goes first (a priority note, or
+    "that window was just taken")."""
+    state = context.userdata
+    t = now()
+    try:
+        open_windows = await _calendar_call(context, backends().calendar.open_windows, t)
+    except Exception:
+        logger.exception("calendar unavailable")
+        return _respond(context, intake.calendar_unavailable(state, CONFIG))
+    pick = functools.partial(
+        calendar.pick_windows, open_windows, CONFIG.booking, t, priority=state.priority
+    )
+    if day or part_of_day:
+        asked, windows = "matching", pick(day=day, part_of_day=part_of_day)
+        if not windows:
+            asked, windows = "alternatives", pick()
+    elif later and state.offered_windows:
+        asked, windows = "later", pick(after_id=max(state.offered_windows))
+    else:
+        asked, windows = "first", pick()
+    result = intake.offer_windows(state, CONFIG, windows, asked, t.date(), lead_in=lead_in.say)
+    logger.info("windows offered", extra={"asked": asked, "windows": [w.id for w in windows]})
+    out = _respond(context, result)
+    if out is not None and windows:
+        out["windows"] = [{"id": w.id, "when": state.offered_windows[w.id]} for w in windows]
+    return out
+
+
+async def _send_lead(state: CallState) -> None:
+    """A booked call or a callback request: hand the lead to the background sender. Never fails
+    the caller's turn; the outbox is the safety net."""
+    window = None
+    if state.outcome is Outcome.BOOKED and state.held_window:
+        window = calendar.window_by_id(state.held_window, CONFIG.booking, now())
+    key, payload = build_lead(state, window)
+    try:
+        await backends().leads.send(key, payload)
+    except Exception:
+        logger.exception("lead not stored", extra={"lead": key})
+
+
+async def _run(
+    context: RunContext[CallState],
+    logic: Callable[..., GateResult],
+    *,
+    prepare: Callable[[], Awaitable[dict[str, Any]]] | None = None,
+    offer: dict[str, Any] | None = None,
+    **kwargs: Any,
+) -> dict[str, Any] | None:
+    """Run one tool's logic. prepare: the tool's I/O, done first, its results passed to the
+    logic. offer: filters for the windows if the logic says offer_windows."""
+    state = context.userdata
+    state.caller_turns = _caller_turns(context)
+    name = logic.__name__
+    # A safety report always goes through: the script matters more than anything else.
+    if logic is not intake.report_safety_hazard:
+        if state.closing:
+            # Riley is saying goodbye. A stray late turn (cloud call, 2026-10-22: "two." after an
+            # out-of-area ZIP) must not change the record or start a new exchange.
+            logger.info("tool ignored: call already decided", extra={"tool": name})
+            return None
+        if state.outcome is Outcome.BOOKED:
+            return _respond(context, gates.already_booked(state))
+    if prepare is not None:
+        try:
+            kwargs.update(await prepare())
+        except Exception:
+            logger.exception("calendar unavailable", extra={"tool": name})
+            return _respond(context, intake.calendar_unavailable(state, CONFIG))
+    before = state.outcome
+    try:
+        result = logic(state, CONFIG, **kwargs)
+    except ValueError as e:  # an id the schema couldn't rule out; let the LLM correct it
+        logger.info("tool rejected", extra={"tool": name, "error": str(e)})
+        raise ToolError(str(e)) from e
+    logger.info(
+        "tool decision",
+        extra={"tool": name, "decision": result.decision.value, "next_step": result.next_step},
+    )
+    if state.outcome is not before and state.outcome in (
+        Outcome.BOOKED,
+        Outcome.CALLBACK_REQUESTED,
+    ):
+        await _send_lead(state)
+    if result.next_step == "offer_windows":
+        return await _offer(context, result, **(offer or {}))
+    return _respond(context, result)
+
+
+# --- EndCallTool hooks (main.py) ---------------------------------------------------------------
+
+
 async def end_call_requested(ev: Toolset.ToolCalledEvent) -> None:
     """EndCallTool hook: log that the model ended the call (the caller said they were done)."""
     logger.info("hanging up", extra={"by": "end_call"})
@@ -119,32 +316,13 @@ async def end_call_requested(ev: Toolset.ToolCalledEvent) -> None:
 
 async def no_second_goodbye(ev: Toolset.ToolCompletedEvent) -> None:
     """EndCallTool hook: if a gate already ended the call, Riley has said goodbye; don't cue
-    another. Returning no output means no reply, and the call ends after the current speech."""
-    if ev.ctx.userdata.outcome is not None:
+    another. Returning no output means no reply, and the call ends after the current speech.
+    A booked call isn't closing: Riley still says goodbye when the caller is done."""
+    if ev.ctx.userdata.closing:
         ev.output = None
 
 
-def _run(context: RunContext[CallState], logic, **kwargs) -> dict[str, Any] | None:
-    if context.userdata.outcome is not None and logic is not intake.report_safety_hazard:
-        # The call is decided and Riley is closing it. A stray late turn (cloud call, 2026-10-22:
-        # "two." after an out-of-area ZIP) must not change the record or start a new exchange.
-        # A safety report still goes through: the script matters more than a clean goodbye.
-        logger.info("tool ignored: call already decided", extra={"tool": logic.__name__})
-        return None
-    try:
-        result = logic(context.userdata, CONFIG, **kwargs)
-    except ValueError as e:  # an id the schema should have prevented; let the LLM correct it
-        logger.info("tool rejected", extra={"tool": logic.__name__, "error": str(e)})
-        raise ToolError(str(e)) from e
-    logger.info(
-        "tool decision",
-        extra={
-            "tool": logic.__name__,
-            "decision": result.decision.value,
-            "next_step": result.next_step,
-        },
-    )
-    return _respond(context, result)
+# --- The tools ---------------------------------------------------------------------------------
 
 
 @function_tool
@@ -168,7 +346,7 @@ async def record_issue(
         indoor_temp_f: The indoor temperature in Fahrenheit, only if the caller mentions it.
         safety_signals: Any hazard the caller mentions in the same breath.
     """
-    return _run(
+    return await _run(
         context,
         intake.record_issue,
         category=category,
@@ -196,7 +374,7 @@ async def record_caller_details(
         first_name: The caller's first name.
         callback_number: The best number to call them back on, as heard.
     """
-    return _run(
+    return await _run(
         context,
         intake.record_caller_details,
         first_name=first_name,
@@ -213,7 +391,7 @@ async def record_service_location(
     Args:
         zip_code: The ZIP code exactly as you heard it, digits or words.
     """
-    return _run(context, intake.record_service_location, zip_code=zip_code)
+    return await _run(context, intake.record_service_location, zip_code=zip_code)
 
 
 @function_tool
@@ -228,7 +406,7 @@ async def report_safety_hazard(
     Args:
         signal: Which hazard the caller described.
     """
-    return _run(context, intake.report_safety_hazard, signal=signal)
+    return await _run(context, intake.report_safety_hazard, signal=signal)
 
 
 @function_tool
@@ -246,7 +424,7 @@ async def request_callback(
         first_name: The caller's first name, only if they've said it.
         callback_number: Their callback number as heard, only if they've said it.
     """
-    return _run(
+    return await _run(
         context,
         intake.request_callback,
         reason=reason,
@@ -255,10 +433,98 @@ async def request_callback(
     )
 
 
+@function_tool
+async def find_windows(
+    context: RunContext[CallState],
+    day: Day | None = None,
+    part_of_day: PartOfDay | None = None,
+) -> dict[str, Any] | None:
+    """Find other appointment windows: when the caller asks for a particular day or time of
+    day, or for something later than the windows you offered.
+
+    Args:
+        day: The day they asked for, only if they named one.
+        part_of_day: Morning, afternoon or evening, only if they said.
+    """
+    later = day is None and part_of_day is None
+    return await _run(
+        context,
+        intake.find_windows,
+        offer={"day": day, "part_of_day": part_of_day, "later": later},
+    )
+
+
+@function_tool
+async def choose_window(context: RunContext[CallState], window_id: str) -> dict[str, Any] | None:
+    """Hold the window the caller picked, so you can read it back before booking. Call again if
+    they change their mind.
+
+    Args:
+        window_id: The id of a window you offered, exactly as it appeared in the tool result.
+    """
+    state = context.userdata
+
+    async def still_open() -> dict[str, Any]:
+        t = now()
+        windows = await _calendar_call(context, backends().calendar.open_windows, t)
+        is_open = any(
+            w.id == window_id and calendar.bookable(w, CONFIG.booking, t, state.priority)
+            for w in windows
+        )
+        return {"still_open": is_open}
+
+    return await _run(context, intake.choose_window, prepare=still_open, window_id=window_id)
+
+
+@function_tool
+async def book_appointment(context: RunContext[CallState]) -> dict[str, Any] | None:
+    """Book the window the caller chose. Call only after you've read back their number and the
+    window and they've said it's right."""
+    # It writes a booking, so a barge-in mustn't stop it halfway (LiveKit's guidance for tools
+    # that change data).
+    context.disallow_interruptions()
+    state = context.userdata
+
+    async def book() -> dict[str, Any]:
+        # The calendar is only touched once the booking gate allows it; intake.book_appointment
+        # runs the same gate again to say why not.
+        if gates.booking_gate(state, CONFIG).decision is not Decision.CONFIRMED:
+            return {"booking": None}
+        window_id = state.held_window or ""
+        book_window = functools.partial(
+            backends().calendar.book,
+            key=calendar.booking_key(state.call_id, window_id),
+            call_id=state.call_id,
+            window_id=window_id,
+            details={
+                "first_name": state.first_name,
+                "callback_number": state.callback_number,
+                "zip_code": state.zip_code,
+                "category": state.category,
+                "symptoms": state.symptoms,
+                "priority": state.priority,
+            },
+            now=now(),
+            priority=state.priority,
+        )
+        try:
+            booking = await _calendar_call(context, book_window)
+        except calendar.WindowUnavailable:
+            logger.info("window taken at booking", extra={"window": window_id})
+            return {"booking": None}
+        logger.info("booked", extra={"booking_id": booking.booking_id, "window": booking.window_id})
+        return {"booking": booking}
+
+    return await _run(context, intake.book_appointment, prepare=book)
+
+
 ALL_TOOLS = [
     record_issue,
     record_caller_details,
     record_service_location,
     report_safety_hazard,
     request_callback,
+    find_windows,
+    choose_window,
+    book_appointment,
 ]
