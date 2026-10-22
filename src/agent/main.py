@@ -158,10 +158,14 @@ async def entrypoint(ctx: JobContext) -> None:
         # The audio turn detector is also the default; it's explicit here because it's what
         # stops Riley cutting in when a caller pauses mid-sentence. Interruptions, false-
         # interruption recovery and preemptive generation use their defaults (all on).
-        # max_delay is tools.py's DEFAULT_MAX_DELAY; tools shorten it for short answers.
+        # Endpointing starts at the detector's defaults; tools.endpointing_for adjusts it per
+        # question (shorter max for short answers, longer min for digits).
         turn_handling=TurnHandlingOptions(
             turn_detection=inference.TurnDetector(),
-            endpointing={"max_delay": tools.DEFAULT_MAX_DELAY},
+            endpointing={
+                "min_delay": tools.DEFAULT_MIN_DELAY,
+                "max_delay": tools.DEFAULT_MAX_DELAY,
+            },
         ),
         user_away_timeout=SILENCE_SECONDS,
         userdata=state,

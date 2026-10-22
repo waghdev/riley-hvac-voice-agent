@@ -35,11 +35,21 @@ CallbackReason = Literal[tuple(sorted(CONFIG.callback_reasons))]  # type: ignore
 DEFAULT_MAX_DELAY = 2.5  # the audio turn detector's documented default
 SHORT_MAX_DELAY = 1.0
 SHORT_ANSWER_FIELDS = frozenset({"first_name", "callback_number", "zip_code"})
+# And the other way for digits: callers pause between groups ("eight zero one three nine ...
+# two"), and a confident detector committed 0.3 s after the first group, splitting a ZIP across
+# two turns (cloud call, 2026-10-22). Digit answers wait at least 0.6 s.
+DEFAULT_MIN_DELAY = 0.3  # the audio turn detector's documented default
+DIGITS_MIN_DELAY = 0.6
+DIGIT_FIELDS = frozenset({"callback_number", "zip_code"})
 
 
 def endpointing_for(state: CallState) -> dict[str, float]:
     short = state.expecting in SHORT_ANSWER_FIELDS
-    return {"max_delay": SHORT_MAX_DELAY if short else DEFAULT_MAX_DELAY}
+    digits = state.expecting in DIGIT_FIELDS
+    return {
+        "min_delay": DIGITS_MIN_DELAY if digits else DEFAULT_MIN_DELAY,
+        "max_delay": SHORT_MAX_DELAY if short else DEFAULT_MAX_DELAY,
+    }
 
 
 def _formatted_number(digits: str) -> str:
@@ -115,6 +125,12 @@ async def no_second_goodbye(ev: Toolset.ToolCompletedEvent) -> None:
 
 
 def _run(context: RunContext[CallState], logic, **kwargs) -> dict[str, Any] | None:
+    if context.userdata.outcome is not None and logic is not intake.report_safety_hazard:
+        # The call is decided and Riley is closing it. A stray late turn (cloud call, 2026-10-22:
+        # "two." after an out-of-area ZIP) must not change the record or start a new exchange.
+        # A safety report still goes through: the script matters more than a clean goodbye.
+        logger.info("tool ignored: call already decided", extra={"tool": logic.__name__})
+        return None
     try:
         result = logic(context.userdata, CONFIG, **kwargs)
     except ValueError as e:  # an id the schema should have prevented; let the LLM correct it
