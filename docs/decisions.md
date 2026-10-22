@@ -2,6 +2,76 @@
 
 One entry per decision: date, decision, alternatives considered, reason. Newest at the top.
 
+## 2026-10-22: A fact the model claims must be in the caller's words (vulnerable occupant)
+
+- **Found:** in the debugger, "my AC stopped cooling, it's blowing warm air" was recorded with
+  `vulnerable_occupant="infant"` in 1 of 5 runs (with `indoor_temp_f: 0` in the same call: the
+  model filling every optional field). That made the call priority, which unlocks same-day
+  windows.
+- **Decision:** `record_issue` takes `vulnerable_occupant_words`, the caller's exact words, and
+  `intake.py` keeps the occupant only if those words appear in what the caller said
+  (`parsing.said_by_caller`: case and punctuation ignored, whole words). An invented quote isn't in
+  the transcript, so the claim is dropped. The LLM still extracts; code verifies, then decides.
+- **Alternatives:** a stronger prompt or docstring (the docstring already said "only if the caller
+  says"); an explicit "none" enum value (makes the right answer easier, guarantees nothing);
+  keyword lists per occupant type (miss real phrasings like "my mom's 82"). Raising a ToolError on
+  a failed check would let the model retry with a made-up quote and cost a round trip, so the claim
+  is dropped and logged instead.
+- **Same session:** `not_working` was false 3 of 3 times for "stopped cooling, blowing warm air,
+  95 in here": the model read a running AC as working. The parameter the model sees is now
+  `no_cooling_or_heat`, with examples (18 of 18 right after); the state field keeps its name.
+- **Not done yet:** a made-up indoor temperature (other than 0, which is already ignored) would
+  also make a call priority. Not seen so far; the same check would apply if it shows up.
+
+## 2026-10-22: M3 booking and CRM, as built (design approved by Dev)
+
+Dev approved the six design calls before the build; these are those, plus the smaller choices made
+along the way.
+
+- **Where leads go:** the deployed agent has no CRM to reach (the mock CRM runs on Dev's PC), so
+  its leads wait in the outbox, with a log line. `mock_crm` runs locally for tests and demos.
+  A free Cloudflare quick tunnel can point the cloud agent at it when an end-to-end demo is wanted.
+- **Bookings in SQLite, not JSON:** each call runs in its own process, and two calls taking the
+  last place in a window would race on a JSON file. `BEGIN IMMEDIATE` makes "count, then insert"
+  atomic across processes. Other customers' appointments are a weekly pattern in
+  `config/mock_calendar.json`, so the schedule looks real. In the cloud the files live in the
+  container and reset on each deploy, which is fine for a demo.
+- **Business facts added (business.md):** two appointments per window (two technicians), windows
+  up to 6 days ahead (so a weekday name is never ambiguous), same-day windows for priority calls
+  only and at least 60 minutes out (this is what makes a priority call different), and a booked
+  appointment isn't changed on the same call (the caller can call back).
+- **Read-back in code:** `booking_gate` allows a booking only when readiness passes, a window
+  offered on this call is held, and the caller has spoken after a read-back of exactly that number
+  and window. "Spoken after" is counted from `session.history`. The 1.8.8 source adds the caller's
+  message to the history before that turn's tools run (`agent_activity.py`), in tests and on calls
+  alike. Whether the caller said yes is the LLM's call; that the read-back happened, and was
+  answered, is code's.
+- **Fewer round trips:** when the details are complete, the tool result already carries two open
+  windows, so Riley offers them in the same reply.
+- **Tools:** `find_windows` (a day, a part of day, or "later"), `choose_window` (ids from this call's
+  offers only), `book_appointment` (calls `disallow_interruptions()`, LiveKit's guidance for tools
+  that write data). After booking, other tools answer "already booked" instead of changing it;
+  a safety report still goes through.
+- **CRM delivery:** outbox first, then POST with an `Idempotency-Key` (the booking's key, so the
+  calendar and the CRM dedupe the same way). Up to 4 attempts with capped exponential backoff and
+  full jitter (0.5, 1, 2 s caps); 5xx, 408, 429 and network errors retry, other 4xx are marked
+  rejected. httpx (already installed via google-genai) because `MockTransport` and
+  `ASGITransport` test it with no network; FastAPI + uvicorn for the mock, in a dependency group
+  that stays out of the agent image.
+- **Callbacks send a lead too:** otherwise "a team member will call you back" goes nowhere.
+- **At hang-up:** deliveries in flight get 7 s, in a shutdown callback. Deleting the room starts the
+  job's shutdown by itself, and LiveKit kills the process about 10 s later
+  (`shutdown_process_timeout`), so a step after `delete_room()` could be cut off silently. Leads
+  are usually long delivered by then; anything cut off stays pending in the outbox.
+- **Filler line:** calendar calls run in a worker thread (SQLite blocks; a blocked event loop
+  stalls the call's audio). If one takes over 1 s, Riley says "One sec, checking the schedule."
+  after the "Got it.". `CALENDAR_DELAY_SECONDS` makes the calendar slow for a demo.
+- **Calendar down:** any calendar error offers a callback instead of failing the turn.
+- **Speech:** "between 12-2 pm" is now said "between noon and two", not "noon to two" (found while
+  writing the README trace).
+- **Checked end to end** in the text-mode debugger, against the local mock CRM set to fail twice:
+  500, 500, 201, one lead stored, outcome `booked`, one goodbye, clean shutdown.
+
 ## 2026-10-22: M2 closed with the measured latency gap accepted (Dev's decision)
 
 - **Measured (6 cloud calls, us-east, web):** total response p50 1,231 ms, p90 2,635 ms, against

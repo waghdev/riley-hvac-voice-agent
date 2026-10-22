@@ -4,7 +4,8 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
 
 ## Current state
 
-- **Milestone:** M2 done (2026-10-22). Next: M3 Booking and CRM.
+- **Milestone:** M3 built, tested and deployed (2026-10-22); it closes after Dev's test calls.
+  Next: M4 Web call page.
 - **Location:** `C:\Users\Devendra\Projects\Riley - HVAC`. Repo: https://github.com/waghdev/voice-agent-reference
   (private until M7). LiveKit project: `riley-kestrel-comfort-heating-a` (Build).
 - **Stack as built:** Deepgram `nova-3` STT + Aura-2 TTS (Dev's key), LLM
@@ -12,10 +13,13 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
   bundled Silero VAD, ai-coustics `QUAIL_L`.
 - **Deployed:** `riley` runs on LiveKit Cloud in `us-east` (Build plan), so latency can be measured
   the way visitors will get it. Office ambience and keyboard typing are on.
-- **Next step:** M3: agree the CRM hosting question with Dev, then the mock calendar, booking with
-  idempotency, `mock_crm` with a failure switch, `crm_client` retries and outbox, and a filler line
-  when a tool is slow. The booking step must read back the callback number (the model padded a
-  9-digit number to 10 on a cloud call).
+- **Next step:** Dev test-calls the deployed agent in Agent Console and books an appointment:
+  Riley offers two windows, reads back the number and the window, and books on a yes. Worth
+  trying: changing the window after the read-back, correcting the number, asking for "anything
+  Friday afternoon", and "just book it" without confirming. Then M4.
+- **Calendar and leads in the cloud:** SQLite files inside the container, reset on each deploy.
+  No CRM is reachable from the cloud, so leads wait in the container's outbox (by design; see
+  decisions.md). Locally: `uv run uvicorn mock_crm.app:from_env --factory --port 8080`.
 - **Blockers:** none.
 - **Cloud logging:** back to INFO since 2026-10-22 (it was DEBUG briefly to diagnose the first-turn
   wait; DEBUG logs include transcripts, so keep it off once visitors can call).
@@ -59,7 +63,8 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
 - [x] M0 Setup (2026-10-20)
 - [x] M1 Talking agent (2026-10-21; latency gaps above carried into M2/M4)
 - [x] M2 Decision layer (2026-10-22; 244 unit + 11 behavior tests; latency gap accepted by Dev)
-- [ ] M3 Booking and CRM
+- [ ] M3 Booking and CRM (built and deployed 2026-10-22; 353 unit + 20 behavior tests; closes
+      after Dev's test calls)
 - [ ] M4 Web call page
 - [ ] M5 Evals and quality
 - [ ] M6 Phone
@@ -87,6 +92,7 @@ Gemini rate-limit hits). Target: $0.
 
 | Date | Observation |
 | --- | --- |
+| 2026-10-22 | **M3 testing on LiveKit Inference:** about 12 behavior-suite runs (full or partial) and ~40 text-mode debugger turns. Estimate ~$0.20 of the $2.50 monthly credit (one full suite run is ~$0.01–0.02 with the judge). No audio-mode turns. |
 | 2026-10-20 | LiveKit Build allowances are hard caps: requests fail at the limit, with no overage billing ([quotas page](https://docs.livekit.io/deploy/admin/quotas-and-limits.md)). |
 | 2026-10-20 | Build: 1,000 agent session min/month, 5 concurrent sessions, $2.50/month Inference credit, 1 US local number + 50 inbound min, 350 text / 60 audio simulation turns. Shared across all of Dev's free projects. |
 | 2026-10-20 | Turn detector (`inference.TurnDetector`): 7,500 requests/month when self-hosted; requests from agents deployed to LiveKit Cloud don't count. At the cap it falls back to the local `v1-mini` model. Adaptive interruptions: 40,000 requests/month self-hosted, then falls back to VAD-based detection. |
@@ -114,14 +120,6 @@ Gemini rate-limit hits). Target: $0.
   shared with dev testing and any debugger audio-mode TTS. At M4 the public page's
   `MAX_SESSIONS_PER_DAY` (40 in `.env.example`) must drop to about 5, and Riley must close politely
   when the credit is exhausted.
-- **Known bug: name repetition.** "Don't say the caller's name" passed 6/6 once, then 2/4 on
-  2026-10-21, and a live audio run said "Thanks, Jordan" on three turns in a row. A prompt alone
-  doesn't hold at Gemini's default temperature. Fix in M2: the first name lives in `CallState`, and a
-  tested output step stops the caller being addressed by name. The behavior test is in place.
-- **Digits stall the turn detector:** after a spoken ZIP or phone number its end-of-turn
-  probability drops under the threshold and it waits the full 2.5 s. Tune in M2 when Riley knows
-  it just asked for a number (for example a lower `max_delay` while collecting digits).
-- **Ambience level:** Dev to choose from `voice-samples\ambience\` (A/B office, C/D crowded room).
 - **Latency budget is tight:** LLM time to first token alone is ~0.8–1.0 s from India, against a
   0.9 s total target (end of turn + LLM + TTS). Local M1 numbers will include India↔US network
   hops for STT, LLM and TTS; the headline numbers come from the deployed agent (M4). If they still
@@ -131,12 +129,30 @@ Gemini rate-limit hits). Target: $0.
   "up to 10 to 20 seconds of delay" before the agent joins. That conflicts with the ≤ 1,000 ms
   greeting target for a visitor's first call. Measure at M4; the page needs a "connecting" state
   either way. Possible rule 8 conversation.
-- Agent structure: single Agent with tools vs handoffs/tasks. Decide at M2 after checking current docs.
-- Deepgram Aura voice vs Cartesia: compare at M1 by listening; Deepgram is the default.
 - Web starter: agent-starter-react vs the web embed starter. Decide at M4 (embed could later sit on
   scaileai.com; check Vercel Hobby terms first).
 
 ## Session log
+
+### 2026-10-22: M3 booking and CRM built and deployed
+
+- Dev approved the design: one agent, leads wait in the outbox when no CRM is reachable (the
+  cloud), bookings in SQLite, read-back enforced in code, CRM delivery off the caller's path, a
+  filler line for slow calendar calls, httpx + FastAPI.
+- Built: `calendar.py` (windows, priority same-day rule, capacity, idempotent booking),
+  `crm_client.py` (outbox, retries with backoff and jitter, idempotency keys, background sender),
+  `mock_crm/` (FastAPI, one lead per key, failure switch), booking gates and steps, three tools
+  (`find_windows`, `choose_window`, `book_appointment`), `scripts/redeliver_outbox.py`.
+- Debugger, end to end against the local mock CRM set to fail twice: intake, filler line, two
+  windows, read-back, booked, lead delivered on the third attempt (one copy), one goodbye.
+- Bugs found, each with a test before the fix: the model invented `vulnerable_occupant="infant"`
+  (1 in 5; now needs the caller's own words, checked against the transcript); "stopped cooling"
+  read as working, losing the priority (3 of 3; parameter renamed for the model); TTS said
+  "between noon to two" (now "and"). Tests that rejected correct replies: "Thanks for calling."
+  and "Thanks for checking with us." are goodbyes; "I'll book you for..." in a read-back is fine.
+- Tests: 353 unit (CI), 20 behavior. Final full behavior run: 20 of 20 (earlier runs during
+  Dev's connection drop failed on network errors, not on the code).
+- Deployed to LiveKit Cloud (us-east); the worker registered cleanly.
 
 ### 2026-10-22: M2 closed
 
