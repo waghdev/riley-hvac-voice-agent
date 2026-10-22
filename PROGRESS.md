@@ -13,11 +13,14 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
   bundled Silero VAD, ai-coustics `QUAIL_L`.
 - **Deployed:** `riley` runs on LiveKit Cloud in `us-east` (Build plan), so latency can be measured
   the way visitors will get it. Office ambience and keyboard typing are on.
-- **Next step:** Dev calls the deployed agent (Agent Console) and tries: a normal intake with a
-  phone number and ZIP; a ZIP outside the area (85301); "I need my ducts cleaned"; "can I talk to
-  a person about my bill?"; and, last, "I smell gas". Claude turns the cloud logs into the latency
-  table, then closes M2 and starts M3 (mock calendar, booking, CRM).
+- **Next step:** Dev's M2 test calls (2026-10-22): all six outcomes were right, one call ended too
+  early and crashed a tool (fixed, plus logging of who ends each call), and 4 of 6 first turns
+  waited the full 2.5 s. Cloud debug logging is on to see why; one or two more calls are needed,
+  then M2 closes and M3 starts (mock calendar, booking, CRM).
 - **Blockers:** none.
+- **Must do before M4 (public page):** turn cloud debug logging off
+  (`lk agent update-secrets --secrets "LIVEKIT_LOG_LEVEL=info"`). Debug logs include transcripts,
+  which is fine for Dev's fake test data, not for visitors.
 
 ## M1 quality-bar gaps carried into M2 and later (Dev decided, 2026-10-21)
 
@@ -68,7 +71,7 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
 
 | Check | Target | Latest result | Date |
 | --- | --- | --- | --- |
-| Web response latency p50 / p90 | ≤ 900 / 1,400 ms | **1,260 / 2,564 ms** from the deployed agent (us-east, Dev calling from India, 2 calls, 14 turns). Normal turns are at target (757–1,260 ms, most under 1 s); 5 of 14 turns waited the turn detector's full 2.5 s `max_delay` after short answers. Was 2,784 / 5,115 with the agent on Dev's PC. Not met yet | 2026-10-21 |
+| Web response latency p50 / p90 | ≤ 900 / 1,400 ms | **1,231 / 2,635 ms** with the M2 decision layer (6 calls, 17 turns). Later turns p50 1,119 ms (the spoken "Got it." keeps tool turns at 0.8–1.2 s); first turns p50 2,572 ms (4 of 6 hit the 2.5 s `max_delay`; being diagnosed). M1: 1,260 / 2,564. Not met yet | 2026-10-22 |
 | Phone response latency p50 / p90 | ≤ 1,200 / 1,800 ms | | |
 | Greeting start after connect | ≤ 1,000 ms web | 1,361 ms (live TTS) and 1,920 ms (pre-rendered clip), from session start. Joining the room and linking the caller took 1.3 s of the second; TTS was never the bottleneck. Measure "caller connects → first audio" from the web page in M4. Not met | 2026-10-21 |
 | Barge-in stop time | ≤ 300 ms | | |
@@ -91,6 +94,7 @@ Gemini rate-limit hits). Target: $0.
 | 2026-10-20 | Turn detector (`inference.TurnDetector`): 7,500 requests/month when self-hosted; requests from agents deployed to LiveKit Cloud don't count. At the cap it falls back to the local `v1-mini` model. Adaptive interruptions: 40,000 requests/month self-hosted, then falls back to VAD-based detection. |
 | 2026-10-20 | **Gemini free tier is too slow for voice.** Dev's key (project on Free), from Dev's machine (plain round trip to Google 0.2–0.5 s), ~16:30–17:00 UTC, 4 runs each: `gemini-3.5-flash-lite` streaming time to first token median **16.3 s** (11–28 s); Priority via the Interactions API median 17.7 s; `serviceTier: priority` on generateContent median 13.7 s, but the response header said `standard` (silently downgraded). `gemini-3.8-flash`: three of four 503 "high demand" or timeout, one success at 60 s. Target total response is ≤ 0.9 s p50. Rule 8: Dev decides the LLM. |
 | 2026-10-20 | LiveKit Inference LLM benchmark (6 models × 8 calls, then 4 × 24): about 300 tiny requests, well under $0.05 of the $2.50 credit. Time to first token is ~1 s from India (gateway round trip 0.2–0.3 s); gpt-4.1-nano was best (0.76 s reply p50). Table in docs/decisions.md. |
+| 2026-10-22 | **M2 cloud test calls (6)** after a cold start: outcomes incomplete (twice), out_of_area, not_offered, callback_requested, safety_redirect, each as Dev intended except call 1. Call 1 closed as `user_initiated` (our code or `end_call`, not a hang-up) while Dev was still talking; a tool's spoken "Got it." then raised "AgentSession is closing" (fixed; who-ended-the-call logging added). First turns: 4 of 6 waited exactly ~2.5 s, not reproducible with synthesized speech locally (probability 0.46–0.48, 0.3 s). Hypothesis: louder office-chatter ambience reaching Dev's mic. Cloud debug logging on to read the detector's probabilities. One hosted turn-detector timeout (fell back to the local model). Greeting start 1.5–2.3 s. |
 | 2026-10-21 | **Second cloud call** (new version): 9 turns. Normal turns 757–1,260 ms total; three turns sat at exactly 2,501–2,507 ms end-of-utterance (the `max_delay` cap). TTS first audio down to ~50 ms on a warm connection; LLM 402–665 ms. Clean exit: no "did not exit in time", no warnings. Greeting start 1,920 ms, 1.3 s of it joining the room. |
 | 2026-10-21 | **First cloud call** (us-east): total p50 1,308 ms, p90 2,652; end of utterance 387 ms; STT 234 ms; LLM 735 ms; TTS 136 ms; greeting start 1,361 ms. Logs: one hosted turn-detector timeout (fell back to the local mini model); the job hung 10 s at exit and was killed (fixed: background audio now closes before the room is deleted; verify on the next call). |
 | 2026-10-21 | **Latency diagnosis.** Dev's Agent Console calls (web, agent local in India): total p50 2.8 s, p90 5.1 s; end of utterance p50 2.5 s; STT final 1.3–3.8 s; LLM 0.84 s; TTS 0.38 s. Clean speech through the local audio pipeline (debugger `--audio`): end of turn ~0.5 s, LLM 0.8–1.2 s, TTS 0.36–0.56 s, total ~1.9–2.1 s. After a spoken ZIP the turn detector's end-of-turn probability was 0.28 (threshold 0.36), so it waited the full 2.5 s `max_delay` (total 3.2 s); Dev's 2,505 ms turn matches. Dev's 3.8 s turns waited on Deepgram's final transcript, which clean audio doesn't reproduce. Each stage includes India↔US round trips, so the web number has to come from the deployed agent. |
