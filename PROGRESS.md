@@ -4,8 +4,7 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
 
 ## Current state
 
-- **Milestone:** M2 Decision layer: built, tested and deployed (2026-10-21). Waiting on Dev's cloud
-  call to check it against the quality bar, then M2 closes.
+- **Milestone:** M2 done (2026-10-22). Next: M3 Booking and CRM.
 - **Location:** `C:\Users\Devendra\Projects\Riley - HVAC`. Repo: https://github.com/waghdev/voice-agent-reference
   (private until M7). LiveKit project: `riley-kestrel-comfort-heating-a` (Build).
 - **Stack as built:** Deepgram `nova-3` STT + Aura-2 TTS (Dev's key), LLM
@@ -13,14 +12,13 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
   bundled Silero VAD, ai-coustics `QUAIL_L`.
 - **Deployed:** `riley` runs on LiveKit Cloud in `us-east` (Build plan), so latency can be measured
   the way visitors will get it. Office ambience and keyboard typing are on.
-- **Next step:** Dev's M2 test calls (2026-10-22): all six outcomes were right, one call ended too
-  early and crashed a tool (fixed, plus logging of who ends each call), and 4 of 6 first turns
-  waited the full 2.5 s. Cloud debug logging is on to see why; one or two more calls are needed,
-  then M2 closes and M3 starts (mock calendar, booking, CRM).
+- **Next step:** M3: agree the CRM hosting question with Dev, then the mock calendar, booking with
+  idempotency, `mock_crm` with a failure switch, `crm_client` retries and outbox, and a filler line
+  when a tool is slow. The booking step must read back the callback number (the model padded a
+  9-digit number to 10 on a cloud call).
 - **Blockers:** none.
-- **Must do before M4 (public page):** turn cloud debug logging off
-  (`lk agent update-secrets --secrets "LIVEKIT_LOG_LEVEL=info"`). Debug logs include transcripts,
-  which is fine for Dev's fake test data, not for visitors.
+- **Cloud logging:** back to INFO since 2026-10-22 (it was DEBUG briefly to diagnose the first-turn
+  wait; DEBUG logs include transcripts, so keep it off once visitors can call).
 
 ## M1 quality-bar gaps carried into M2 and later (Dev decided, 2026-10-21)
 
@@ -60,7 +58,7 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
 
 - [x] M0 Setup (2026-10-20)
 - [x] M1 Talking agent (2026-10-21; latency gaps above carried into M2/M4)
-- [ ] M2 Decision layer (built, 239 unit + 11 behavior tests, deployed; waiting on Dev's call)
+- [x] M2 Decision layer (2026-10-22; 244 unit + 11 behavior tests; latency gap accepted by Dev)
 - [ ] M3 Booking and CRM
 - [ ] M4 Web call page
 - [ ] M5 Evals and quality
@@ -76,11 +74,11 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
 | Greeting start after connect | ≤ 1,000 ms web | 1,361 ms (live TTS) and 1,920 ms (pre-rendered clip), from session start. Joining the room and linking the caller took 1.3 s of the second; TTS was never the bottleneck. Measure "caller connects → first audio" from the web page in M4. Not met | 2026-10-21 |
 | Barge-in stop time | ≤ 300 ms | | |
 | Backchannels ignored | yes | | |
-| Numbers, ZIPs, times spoken correctly | yes | | |
-| Silence handling and clean end-call | yes | Text mode: check-ins, close and end_call work; unit and behavior tests green. Audio not yet checked | 2026-10-20 |
+| Numbers, ZIPs, times spoken correctly | yes | Code step before TTS (`spoken.py`, 35 unit tests); Dev's cloud calls didn't flag any | 2026-10-22 |
+| Silence handling and clean end-call | yes | Gate-ended calls hang up in code; no second goodbye; clean process exit in cloud; behavior tests green | 2026-10-22 |
 | Scenario suite pass rate | 100% | | |
 | QA grader: critical findings | 0 | | |
-| Dev's listening check vs Retell standard | pass | Dev, second cloud call: "looks good" (one-voice greeting, louder ambience and typing). Voice: Andromeda | 2026-10-21 |
+| Dev's listening check vs Retell standard | pass | Dev, after 7 M2 cloud calls: "I don't feel any latency... the agent responds quickly" (on headphones). Accepted the measured gap (1,231 / 2,635 ms p50/p90) | 2026-10-22 |
 
 ## Quota and cost log
 
@@ -139,6 +137,19 @@ Gemini rate-limit hits). Target: $0.
   scaileai.com; check Vercel Hobby terms first).
 
 ## Session log
+
+### 2026-10-22: M2 closed
+
+- Dev's 6 test calls: all outcomes right; one call closed early by our code (`user_initiated`) and a
+  tool crashed on a closing session (fixed: best-effort acknowledgement; every tool decision and
+  who ended the call is now logged).
+- Seventh call with debug logs: first turn fine (444 ms), so the earlier 2.5 s first turns stay
+  unexplained (Dev uses headphones, so not ambience). Short-answer endpointing confirmed (1.0 s
+  cap used on the name). A ZIP split across two turns, and a stray late turn was recorded after
+  the call was decided: fixed (digits wait at least 0.6 s; tools are no-ops once decided).
+- Dev: responses feel quick; measured gap accepted. Debug logging off again.
+- Behavior tests fixed where they rejected correct replies ("take care" is a goodbye; offering
+  normal service to a prompt injection is right). 3 clean runs.
 
 ### 2026-10-21: M2 decision layer built and deployed
 
