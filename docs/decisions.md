@@ -2,6 +2,21 @@
 
 One entry per decision: date, decision, alternatives considered, reason. Newest at the top.
 
+## 2026-10-22: M2 closed with the measured latency gap accepted (Dev's decision)
+
+- **Measured (6 cloud calls, us-east, web):** total response p50 1,231 ms, p90 2,635 ms, against
+  targets of 900 / 1,400 ms. Later turns p50 1,119 ms. First caller turns p50 2,572 ms: 4 of 6 sat
+  at the 2.5 s endpointing cap. The cause isn't confirmed; it didn't recur in a seventh call with
+  debug logs (444 ms end of utterance), and Dev uses headphones, so ambience leaking into the mic
+  is ruled out.
+- **Decision:** Dev listened to the calls: "I don't feel any latency... the agent responds
+  quickly". The gap stays on the record (rule 8), and the README will report the real numbers.
+  M5 re-measures it with the web page and the scenario runner.
+- **Two fixes from the seventh call:** digit answers (number, ZIP) wait at least 0.6 s before the
+  turn commits, because a confident detector split "eight zero one three nine ... two" into two
+  turns at 0.3 s; and tools are no-ops once the outcome is decided (except a safety report), so a
+  stray late turn can't rewrite the record while Riley says goodbye.
+
 ## 2026-10-21: M2 as built: what the prompt asks for, and what code enforces
 
 Every rule below was tried in the prompt first wherever possible; each one that the model
