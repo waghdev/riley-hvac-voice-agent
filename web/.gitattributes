@@ -1,0 +1,7 @@
+# The starter's Prettier/ESLint rules require LF; keep LF on Windows checkouts too.
+* text=auto eol=lf
+*.otf binary
+*.woff binary
+*.png binary
+*.ico binary
+*.webp binary
