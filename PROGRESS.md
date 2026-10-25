@@ -4,7 +4,8 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
 
 ## Current state
 
-- **Milestone:** M3 done (2026-10-25). Next: M4 Web call page.
+- **Milestone:** M4 Web call page in progress (built and tested locally; waiting on Dev's
+  three account steps to deploy).
 - **Location:** `C:\Users\Devendra\Projects\Riley - HVAC`. Repo: https://github.com/waghdev/voice-agent-reference
   (private until M7). LiveKit project: `riley-kestrel-comfort-heating-a` (Build).
 - **Stack as built:** Deepgram `nova-3` STT + Aura-2 TTS (Dev's key), LLM
@@ -12,8 +13,16 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
   bundled Silero VAD, ai-coustics `QUAIL_L`.
 - **Deployed:** `riley` runs on LiveKit Cloud in `us-east` (Build plan), so latency can be measured
   the way visitors will get it. Office ambience and keyboard typing are on.
-- **Next step:** M4: agree the web page design with Dev (starter, token endpoint, abuse limits,
-  where the rate-limit counters live), then Dev creates the Vercel and Cloudflare accounts.
+- **Next step:** Dev's three steps:
+  1. Run `npx vercel login` once in a terminal.
+  2. Create a Turnstile widget and put the keys in `.env`.
+  3. Create the free Upstash Redis in the Vercel project.
+
+  Then Claude sets the secrets with the CLI (from `.env`, never through chat), deploys, adds the
+  firewall rule, tests the live page, and Dev makes a few calls from the browser.
+- **Web page:** `web/` (Next.js), Vercel project `riley-kestrel-comfort` (created, not deployed
+  yet). Local: `cd web && pnpm dev` with `web/.env.local` (LiveKit values only; Turnstile and
+  the counters use test/in-memory stand-ins locally).
 - **Calendar and leads in the cloud:** SQLite files inside the container, reset on each deploy.
   No CRM is reachable from the cloud, so leads wait in the container's outbox (by design; see
   decisions.md). Locally: `uv run uvicorn mock_crm.app:from_env --factory --port 8080`.
@@ -51,7 +60,11 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
 - [x] `livekit-docs` MCP server in `.mcp.json` (Claude Code asks once to approve it)
 - [x] `.env` created from `.env.example` (gitignored, `GEMINI_MODEL=gemini-3.5-flash-lite`)
 - [x] GitHub repo created, private, pushed; CI green
-- [ ] (M4) Vercel account (Hobby, free) for the public web-call page
+- [x] (M4) Vercel account (Hobby, free): exists, connected to Claude Code's Vercel plugin
+- [ ] (M4) `npx vercel login` once (the CLI sets secrets from `.env` without them passing
+      through chat)
+- [ ] (M4) Upstash Redis, free plan, created from the Vercel project's Storage tab
+- [ ] (optional) Let Vercel's GitHub app see `voice-agent-reference`, for deploy-on-push
 - [ ] (M4) Cloudflare account; Turnstile site key and secret (free)
 - [ ] (M6) Claim the 1 free US local number in LiveKit Cloud
 
@@ -62,7 +75,7 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
 - [x] M2 Decision layer (2026-10-22; 244 unit + 11 behavior tests; latency gap accepted by Dev)
 - [x] M3 Booking and CRM (2026-10-25; 353 unit + 20 behavior tests; Dev's booking call "sounds
       right")
-- [ ] M4 Web call page
+- [ ] M4 Web call page (in progress)
 - [ ] M5 Evals and quality
 - [ ] M6 Phone
 - [ ] M7 Ship
@@ -130,6 +143,22 @@ Gemini rate-limit hits). Target: $0.
   scaileai.com; check Vercel Hobby terms first).
 
 ## Session log
+
+### 2026-10-25: M4 web call page built (not deployed yet)
+
+- Dev approved the design: React starter, `/api/token` behind Turnstile, 3 calls per visitor per
+  hour, 5 a day, under 4 live calls, Upstash counters, Vercel Hobby.
+- Built: `web/` from LiveKit's starter (imported unchanged, then changed in reviewable commits),
+  `lib/gatekeeper.ts` (pure, 14 vitest tests with counters and Turnstile), Kestrel branding,
+  voice-only call view, friendly refusal messages, browser greeting timing sent to the agent.
+- Agent: a pre-rendered "trouble on my end" line and a hang-up when a model fails for good
+  (found in the debugger: 1.8.8 only closes after 3 unrecoverable errors, so the documented
+  pattern left dead air); logs the page's greeting timing as `client_greeting` metrics.
+  Deployed.
+- Checked: the local token endpoint against the real LiveKit project (403 without Turnstile,
+  three admitted, 429 on the fourth); an endpoint token brought the deployed Riley into a
+  fresh room as soon as the connection finished.
+- CI: new `web` job (lint, format, tests, build), green. 367 Python unit tests.
 
 ### 2026-10-25: M3 closed
 

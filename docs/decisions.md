@@ -2,6 +2,56 @@
 
 One entry per decision: date, decision, alternatives considered, reason. Newest at the top.
 
+## 2026-10-25: M4 web call page (design approved by Dev)
+
+- **Page:** LiveKit's `agent-starter-react` (Next.js, MIT) in `web/`, imported unchanged in one
+  commit so every change shows as a diff. Not LiveKit Cloud's hosted embed widget: its only
+  protection is an allowed-origins list (a script can send any Origin), with no bot check,
+  rate limit or daily cap, and it would show none of this engineering.
+- **Token endpoint (`web/app/api/token/route.ts`), server-side only.** `lib/gatekeeper.ts` is a
+  pure function with its I/O passed in (the same pattern as the Python gates). The checks, in
+  order:
+  1. Turnstile, so bots never touch a counter.
+  2. Fewer than 4 live rooms. Asked of LiveKit, since Build allows 5 at once, which leaves one
+     for testing. Being busy doesn't use up a visitor's calls.
+  3. 3 calls per visitor per hour.
+  4. 5 calls a day. The $2.50 LLM credit covers about 220 calls a month, shared with testing.
+
+  Refusals are 403 (bot) or 429, and missing config or a failing dependency is a 503, failing
+  closed because every call costs quota. The room name (`kestrel-web-<random>`) and the agent
+  dispatch are set on the server and never taken from the browser. Tokens live 2 minutes,
+  enough to join; LiveKit refreshes them after that.
+- **Counters:** Upstash Redis (free, 500K commands a month, no card), fixed windows per UTC hour
+  and day, each window its own key. Visitors are keyed by an HMAC of their IP (keyed with the
+  LiveKit secret), never the IP. Vercel's one free firewall rule (Hobby) is an outer flood guard:
+  10 requests a minute per IP on `/api/token`. Its API returns "not found" until the project's
+  first deployment, so it's added after that.
+- **Token source:** `TokenSource.literal(fn)`, a fresh request for every call. `custom` and
+  `endpoint` cache the token until it expires, and a cached token could rejoin a deleted room
+  (recreating it and dispatching Riley again) without passing the checks.
+- **Voice only:** no chat input, camera or screen share. Typed messages would spend the same
+  LLM credit, and the page is meant to feel like a phone call.
+- **Greeting latency from the browser:** the page times "room connected → Riley speaking"
+  (and "Call button → speaking"), shows it, and sends it to the agent on the
+  `riley.client_timing` text stream. The agent validates it as untrusted input and logs it as a
+  `client_greeting` record, and `latency_report.py` reports it. "Speaking" is the agent's state
+  attribute, so the time includes that update reaching the browser.
+- **When a model fails for good** (for example the LLM credit runs out), Riley plays a
+  pre-rendered "trouble on my end" line and hangs up. Rule 6 note: LiveKit's docs say an
+  unrecoverable error closes the session, but 1.8.8 closes only after 3 in a row
+  (`max_unrecoverable_errors`), so the documented say-only pattern left dead air in a debugger
+  call with a broken model name. The handler hangs up itself.
+- **Checked against the real project:** a token from the local endpoint joined a fresh room, and
+  the deployed Riley was dispatched by name and arrived immediately. Over curl: no Turnstile
+  token gave 403, three calls were admitted, the fourth got 429.
+- **Vercel:** project `riley-kestrel-comfort`, root `web/`, functions in `iad1` (US East, near the
+  agent), and builds skipped when a push doesn't touch `web/`. Vercel's GitHub app can't see the
+  private repo, so deploys go through the CLI until Dev grants it access. Secrets go from `.env`
+  to Vercel through the CLI, never through chat.
+- **Small choices:** `web/.gitattributes` keeps LF line endings, because the starter's Prettier
+  rule failed on Windows checkouts. `web/` is excluded from the agent's Docker image. A CI job
+  lints, format-checks, tests and builds the page.
+
 ## 2026-10-22: A fact the model claims must be in the caller's words (vulnerable occupant)
 
 - **Found:** in the debugger, "my AC stopped cooling, it's blowing warm air" was recorded with
