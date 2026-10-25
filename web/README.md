@@ -27,4 +27,6 @@ production, missing Turnstile or Upstash settings make the token endpoint refuse
 ## Credits
 
 Built on LiveKit's [agent-starter-react](https://github.com/livekit-examples/agent-starter-react),
-MIT licensed (see `LICENSE`, copyright LiveKit, Inc.).
+MIT licensed (see `LICENSE`, copyright LiveKit, Inc.). The voice orb
+(`components/agents-ui/agent-audio-visualizer-aura.tsx`) comes with it and is licensed separately
+under the Polyform Non-Resale License 1.0.0 (Unicorn Studio, see the file header).

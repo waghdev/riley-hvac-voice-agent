@@ -140,6 +140,15 @@ Gemini rate-limit hits). Target: $0.
 
 ## Session log
 
+### 2026-10-25: page redesign and a token-fetch fix
+
+- Dev's first visit to the live page: "We couldn't confirm you're human" before pressing Call.
+  Cause: the session hook's own token fetches (warm-up on mount, prefetch after a call). Fixed:
+  only the Call button may request a token (`web/lib/call-token-source.ts`, tested); verified on
+  the live site (no `/api/token` request on load).
+- Redesign: voice orb, cool/warm theme, capability cards, pipeline strip, GitHub and LinkedIn
+  links. Deployed.
+
 ### 2026-10-25: M4 web call page deployed
 
 - Dev did the account steps (Vercel CLI login, Turnstile keys, Upstash, GitHub app access).

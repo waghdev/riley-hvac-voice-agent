@@ -2,6 +2,29 @@
 
 One entry per decision: date, decision, alternatives considered, reason. Newest at the top.
 
+## 2026-10-25: Page redesign (Dev's request), and only the Call button asks for a token
+
+- **Bug (Dev's first visit to the live page):** "We couldn't confirm you're human" showed before
+  he pressed Call. `useSession` fetches tokens by itself (livekit components-react source): once
+  on mount to warm up the connection (`prepareConnection`), and again when a call ends, to have
+  the next one ready. Those requests reached `/api/token` with no Turnstile token, were refused,
+  set the message, and spent the visitor's Turnstile token.
+- **Fix:** `web/lib/call-token-source.ts` lets exactly one request through per press of Call.
+  The hook's own fetches get a promise that never settles: the hook doesn't wait on them (the
+  warm-up only logs a warning on failure, and the prefetch isn't awaited), so nothing hangs,
+  nothing reaches the endpoint, and nothing is logged. Unit-tested. The page does its own warm-up
+  without a token: `room.prepareConnection(LIVEKIT_URL)` covers DNS, TLS and the region lookup.
+  Checked on the live site with headless Chrome: no `/api/token` request on page load.
+- **Design (Dev asked for "a voice orb, links and graphics"):**
+  - The starter's Aura shader orb is the hero. It idles, pulses once the visitor can call, and
+    spins up while connecting; the same orb reacts to Riley's voice in the call view.
+  - Cool/warm glows and a faint grid behind the content: heating and cooling.
+  - Capability cards (only things Riley does today), a "how a turn works" pipeline, and Dev's
+    GitHub and LinkedIn links.
+  - The Aura component is licensed Polyform Non-Resale (Unicorn Studio), not MIT. Fine for a
+    demo; credited in `web/README.md`.
+  - Checked at 1440 px and on a Pixel 7 profile.
+
 ## 2026-10-25: M4 web call page (design approved by Dev)
 
 - **Page:** LiveKit's `agent-starter-react` (Next.js, MIT) in `web/`, imported unchanged in one
