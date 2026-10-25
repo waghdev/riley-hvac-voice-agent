@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { useAgent, useSessionContext } from '@livekit/components-react';
 import { AgentSessionView_01 } from '@/components/agents-ui/blocks/agent-session-view-01';
 import { WelcomeView } from '@/components/app/welcome-view';
+import { useGreetingTiming } from '@/hooks/useGreetingTiming';
 
 const MotionWelcomeView = motion.create(WelcomeView);
 const MotionSessionView = motion.create(AgentSessionView_01);
@@ -28,40 +29,46 @@ const VIEW_MOTION_PROPS = {
 };
 
 interface ViewControllerProps {
-  isVideoInputSupported: boolean;
+  turnstileSiteKey: string;
+  onTurnstileToken: (token: string | null) => void;
+  turnstileReset: number;
+  canStart: boolean;
+  refusal: string | null;
+  onStartCall: () => void;
+  clickedAt: number | null;
 }
 
-export function ViewController({ isVideoInputSupported }: ViewControllerProps) {
-  const { isConnected, start } = useSessionContext();
+export function ViewController({ clickedAt, ...welcome }: ViewControllerProps) {
+  const { isConnected } = useSessionContext();
   const agent = useAgent();
   const { resolvedTheme } = useTheme();
+  const timing = useGreetingTiming(clickedAt);
 
   return (
     <AnimatePresence mode="wait">
       {/* Welcome view */}
-      {!isConnected && (
-        <MotionWelcomeView
-          key="welcome"
-          {...VIEW_MOTION_PROPS}
-          startButtonText="Start call"
-          onStartCall={start}
-        />
-      )}
-      {/* Session view */}
+      {!isConnected && <MotionWelcomeView key="welcome" {...VIEW_MOTION_PROPS} {...welcome} />}
+      {/* Session view: voice only, so no chat input, camera or screen share */}
       {isConnected && (
         <MotionSessionView
           key="session-view"
           {...VIEW_MOTION_PROPS}
-          preConnectMessage={
-            agent.isConnected ? 'Agent is listening, ask it a question' : 'Waiting for agent'
-          }
-          supportsChatInput={true}
-          supportsVideoInput={isVideoInputSupported}
-          supportsScreenShare={isVideoInputSupported}
+          preConnectMessage={agent.isConnected ? 'Riley is listening' : 'Connecting you to Riley…'}
+          supportsChatInput={false}
+          supportsVideoInput={false}
+          supportsScreenShare={false}
           isPreConnectBufferEnabled={true}
           themeMode={resolvedTheme === 'dark' ? 'dark' : 'light'}
           className="fixed inset-0"
         />
+      )}
+      {isConnected && timing && (
+        <p
+          key="timing"
+          className="text-muted-foreground fixed top-4 left-1/2 z-50 -translate-x-1/2 font-mono text-xs"
+        >
+          Riley picked up {(timing.connectToSpeechMs / 1000).toFixed(1)} s after connecting
+        </p>
       )}
     </AnimatePresence>
   );

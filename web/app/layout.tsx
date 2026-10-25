@@ -53,8 +53,11 @@ export default function RootLayout({ children }: RootLayoutProps) {
       )}
     >
       <head>
-        <title>LiveKit Voice Agent</title>
-        <meta name="description" content="A voice agent built with LiveKit" />
+        <title>Talk to Riley | Kestrel Comfort (demo)</title>
+        <meta
+          name="description"
+          content="Call Riley, an AI phone agent for a fictional HVAC company, from your browser. A demo by Dev Wagh, Scaile AI, built on LiveKit Agents."
+        />
       </head>
       <body className="overflow-x-hidden">
         <ThemeProvider
@@ -64,21 +67,9 @@ export default function RootLayout({ children }: RootLayoutProps) {
           disableTransitionOnChange
         >
           <header className="fixed top-0 left-0 z-50 hidden w-full flex-row justify-between p-6 md:flex">
-            <a
-              target="_blank"
-              rel="noopener noreferrer"
-              href="https://livekit.io"
-              className="scale-100 transition-transform duration-300 hover:scale-110"
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src="/lk-logo.svg" alt="LiveKit Logo" className="block size-6 dark:hidden" />
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src="/lk-logo-dark.svg"
-                alt="LiveKit Logo"
-                className="hidden size-6 dark:block"
-              />
-            </a>
+            <span className="text-foreground font-mono text-xs font-bold tracking-wider uppercase">
+              Demo by Dev Wagh · Scaile AI
+            </span>
             <span className="text-foreground font-mono text-xs font-bold tracking-wider uppercase">
               Built with{' '}
               <a
