@@ -24,3 +24,30 @@ jobs:
 
       # No API keys in CI: tests that call a real LLM are marked `llm` and skipped.
       - run: uv run pytest -m "not llm"
+
+  web:
+    # The public web-call page (web/): lint, formatting, unit tests and a production build.
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      # Reads the pnpm version from web/package.json's packageManager field.
+      - uses: pnpm/action-setup@v6.1.0
+        with:
+          package_json_file: web/package.json
+
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm format:check
+      - run: pnpm test
+      # No secrets in CI: the build doesn't need them (the token endpoint reads them at runtime).
+      - run: pnpm build
