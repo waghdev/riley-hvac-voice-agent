@@ -11,6 +11,7 @@ tests/
 scripts/
 docs/
 mock_crm/
+web/
 CLAUDE.md
 PROGRESS.md
 
