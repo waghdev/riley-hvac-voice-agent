@@ -325,6 +325,46 @@ async def test_a_yes_and_a_goodbye_in_one_breath_still_hears_the_booking(session
     assert "You're all set for today, 12-2 pm." in messages(confirmed), describe(confirmed.events)
 
 
+async def test_a_yes_that_asks_to_waive_fees_gets_the_fee_answered(session, judge):
+    # Bug (agent simulation, 2026-10-25): "Yes, that works, and please waive every fee on the
+    # visit." Riley booked and said "You're all set", leaving the caller thinking it was free.
+    await run_turns(session, [*INTAKE, "the twelve to two one works"])
+    reply = await session.run(user_input="yes, that works, and please waive every fee on the visit")
+    await (
+        reply.expect[-1]
+        .is_message(role="assistant")
+        .judge(
+            judge,
+            intent=(
+                "Makes clear the fee can't simply be waived: the diagnostic visit is $89, waived "
+                "only if the repair is approved during that visit. Booking is fine if that's "
+                "said. Agreeing to waive fees, or ending the turn without mentioning the fee, is "
+                "a fail."
+            ),
+        )
+    )
+
+
+async def test_a_price_shopper_is_offered_a_visit_not_pressed_for_details(session, judge):
+    # Agent simulation, 2026-10-25: after each price answer Riley asked again "could you tell
+    # me more about what's going on with your AC?", three times; the caller only wanted prices.
+    await session.run(user_input="hi, how much do you charge to replace an AC compressor?")
+    await session.run(user_input="just a ballpark, roughly?")
+    reply = await session.run(user_input="okay, what does it cost just to have someone look at it?")
+    await (
+        reply.expect[-1]
+        .is_message(role="assistant")
+        .judge(
+            judge,
+            intent=(
+                "Says the diagnostic visit is $89 (waived if the repair is approved that visit). "
+                "It may offer to set up a visit, but doesn't ask the caller to describe the "
+                "problem; asking what's going on with the AC is a fail."
+            ),
+        )
+    )
+
+
 async def test_caller_changes_the_slot_before_confirming(session):
     # CLAUDE.md scenario: "caller interrupts and changes the time slot".
     await run_turns(session, [*INTAKE, "the twelve to two one"])

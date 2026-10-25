@@ -241,6 +241,9 @@ def _respond(context: RunContext[CallState], result: GateResult) -> dict[str, An
         # A gate ended the call, so code hangs up, not the LLM: once Riley's reply to this result
         # has played, the session closes. Leaving it to end_call gave two goodbyes, or none and
         # an open line (behavior tests, 2026-10-21). LiveKit's EndCallTool uses the same hook.
+        # The model still calls end_call after its goodbye in most runs (agent simulations,
+        # 2026-10-25; renaming this step didn't change that). Harmless: no_second_goodbye
+        # cues no reply, and the session closes once.
         logger.info("hanging up", extra={"by": "gate", "decision": result.decision.value})
         context.speech_handle.add_done_callback(lambda _: session.shutdown())
         out["say"] = (

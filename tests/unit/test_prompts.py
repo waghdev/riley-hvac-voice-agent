@@ -33,7 +33,8 @@ def test_instructions_stay_short():
     # The model re-reads the prompt every turn, so length is latency (CLAUDE.md section 4).
     # M1's limit was 300 words; M2 adds the tool workflow and the category list (~440 words),
     # M3 the booking steps (~490). The callback promise comes from the gate, not the prompt.
-    assert len(prompts.build_instructions(BUSINESS).split()) < 500
+    # M5 the no-discounts rule (~513): a caller's "and waive every fee" went unanswered.
+    assert len(prompts.build_instructions(BUSINESS).split()) < 520
 
 
 @pytest.mark.parametrize(

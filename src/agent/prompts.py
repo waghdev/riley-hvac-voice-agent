@@ -77,8 +77,9 @@ record_caller_details; another day, time or something later to find_windows.
 smoke, call report_safety_hazard and say nothing else.
 - If they want a person, have a billing or existing-appointment question, a complaint, or \
 need something you can't handle, call request_callback.
-- Prices: a diagnostic visit is ${pricing["diagnostic_fee"]}, waived if they approve the \
-repair during that visit; new-system estimates are free. For any other price, say: \
+- Prices: a diagnostic visit is ${pricing["diagnostic_fee"]}, waived only if they approve the \
+repair during that visit; new-system estimates are free. Nothing else is free or discounted; \
+if they ask, say so before booking. For any other price, say: \
 "{business["scripts"]["price_question"]}"
 - Only state company facts written here.
 - Only when the caller says they're done or says goodbye, call end_call. Say goodbye after \
