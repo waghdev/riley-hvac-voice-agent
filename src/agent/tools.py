@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
-from livekit.agents import RunContext, function_tool
+from livekit.agents import RunContext, function_tool, get_job_context
 from livekit.agents.llm import ChatMessage, ToolError, Toolset
 
 from agent import calendar, gates, intake, prompts
@@ -83,13 +83,53 @@ class Backends:
 _backends: Backends | None = None
 
 
+@dataclass
+class Simulated:
+    """A simulated call's own world: a fresh calendar, leads that are never sent, a fixed clock."""
+
+    backends: Backends
+    now: datetime
+
+
+# Job id -> its simulated world. Keyed by job, not one process-wide override, because on
+# Windows the SDK runs jobs as threads of one process (livekit-agents 1.8.8,
+# _default_job_executor_type), and a simulation run has many calls going at once.
+_simulated: dict[str, Simulated] = {}
+
+
+def start_simulation(job_id: str, data: Path, at: datetime) -> None:
+    """Under an agent simulation (main.py): this job's tools use a calendar in `data` holding
+    only the weekly pattern, keep leads in a local outbox, and see the time as `at`. So every
+    run of a scenario offers the same windows, and nothing reaches the real calendar."""
+    _simulated[job_id] = Simulated(
+        backends=Backends(
+            calendar=Calendar(data / "calendar.sqlite3", CONFIG.booking, calendar.load_existing()),
+            leads=LeadSender(CrmClient(None, Outbox(data / "outbox.sqlite3"))),
+        ),
+        now=at,
+    )
+
+
+def end_simulation(job_id: str) -> None:
+    _simulated.pop(job_id, None)
+
+
+def _simulation() -> Simulated | None:
+    if not _simulated:  # every real call
+        return None
+    job = get_job_context(required=False)
+    return _simulated.get(job.job.id) if job is not None else None
+
+
 def backends() -> Backends:
     """Created on first use, from the environment (main.py loads .env first):
     DATA_DIR       where the SQLite files live (default: data/ in the repo)
     MOCK_CRM_URL   the CRM; unset means leads wait in the outbox (the deployed demo)
     CALENDAR_DELAY_SECONDS  demo switch: a slow calendar, to hear the filler line
-    Tests replace _backends with temporary ones."""
+    Tests replace _backends with temporary ones; a simulated call gets its own."""
     global _backends
+    if (sim := _simulation()) is not None:
+        return sim.backends
     if _backends is None:
         data = Path(os.getenv("DATA_DIR", REPO_ROOT / "data"))
         _backends = Backends(
@@ -113,7 +153,10 @@ async def drain_leads(timeout: float) -> None:
 
 
 def now() -> datetime:
-    """The business's local time. A function so tests can pin the clock."""
+    """The business's local time. A function so tests can pin the clock; simulations pin it
+    too (start_simulation)."""
+    if (sim := _simulation()) is not None:
+        return sim.now
     return datetime.now(TZ)
 
 

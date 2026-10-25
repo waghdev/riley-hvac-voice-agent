@@ -11,9 +11,11 @@ LiveKit APIs used here were checked against the livekit-agents 1.8.8 docs and in
 import asyncio
 import logging
 import os
+import tempfile
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable, Sequence
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 from livekit import rtc
@@ -28,17 +30,22 @@ from livekit.agents import (
     ConversationItemAddedEvent,
     ErrorEvent,
     JobContext,
+    ModelSettings,
+    SimulationContext,
+    StopResponse,
     TurnHandlingOptions,
     UserStateChangedEvent,
     cli,
     inference,
+    llm,
     room_io,
 )
 from livekit.agents.beta.tools import EndCallTool
 from livekit.agents.llm import ChatMessage
+from livekit.agents.simulation import SimulationMode
 from livekit.plugins import ai_coustics, deepgram
 
-from agent import prompts, tools
+from agent import prompts, scenarios, tools
 from agent.clips import Clip, load_clip
 from agent.config import DEFAULT_TTS_VOICE, REPO_ROOT, load_business
 from agent.metrics import CLIENT_TIMING_TOPIC, JsonlWriter, TurnPairer, client_timing_record
@@ -141,8 +148,12 @@ def close_on_fatal_error(
     return on_error
 
 
+TextTransform = Callable[[AsyncIterable[str]], AsyncIterable[str]]
+
+
 class Riley(Agent):
-    def __init__(self) -> None:
+    def __init__(self, transcript_transforms: Sequence[TextTransform] = ()) -> None:
+        self._transcript_transforms = transcript_transforms
         super().__init__(
             instructions=prompts.build_instructions(BUSINESS),
             tools=[
@@ -175,16 +186,82 @@ class Riley(Agent):
         else:
             self.session.say(text, allow_interruptions=False)
 
+    async def transcription_node(
+        self, text: AsyncIterable[str], model_settings: ModelSettings
+    ) -> AsyncIterator[str]:
+        """The transcript (web page, simulations) shows what the caller hears: the same
+        acknowledgement and name rules as TTS (entrypoint), with digits left as digits."""
+        for transform in self._transcript_transforms:
+            text = transform(text)
+        async for chunk in Agent.default.transcription_node(self, text, model_settings):
+            yield chunk
+
+
+class SimulatedRiley(Riley):
+    """Riley in an agent simulation, where hanging up on a call that ended wrong leaves the
+    line open (see entrypoint): once she has hung up, she doesn't answer anything the
+    simulated caller still says."""
+
+    def __init__(self, hung_up: Callable[[], bool], **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._hung_up = hung_up
+
+    async def on_user_turn_completed(
+        self, turn_ctx: llm.ChatContext, new_message: ChatMessage
+    ) -> None:
+        if self._hung_up():
+            raise StopResponse()
+
+
+async def check_final_state(sim: SimulationContext) -> None:
+    """End of an agent simulation: fail the run if the call ended differently from what the
+    scenario expects (scenarios.py). The judge only reads the transcript."""
+    state: CallState = sim.job_context.primary_session.userdata
+    failure = scenarios.final_state_failure(sim.userdata().get("expected"), state)
+    logger.info(
+        "simulation final state",
+        extra={
+            "scenario": sim.scenario.label,
+            "outcome": (state.outcome or Outcome.INCOMPLETE).value,
+            "window": state.held_window if state.booking_id else None,
+            "failure": failure,
+            "judge_passed": sim.simulator_verdict.success,
+        },
+    )
+    if failure:
+        sim.fail(reason=f"final state: {failure}")
+
 
 server = AgentServer()
 
 
-@server.rtc_session(agent_name="riley")  # explicit dispatch: rooms must ask for "riley"
+# Explicit dispatch: rooms must ask for "riley".
+@server.rtc_session(agent_name="riley", on_simulation_end=check_final_state)
 async def entrypoint(ctx: JobContext) -> None:
     call_id = ctx.job.id
     ctx.log_context_fields = {"call_id": call_id}
     # Phone calls (SIP participants) get their own label in M6.
     channel = "console" if ctx.is_fake_job() else "web"
+
+    # Under an agent simulation (tests/scenarios), this call gets its own calendar and a fixed
+    # clock, and its turn metrics are labelled so they never mix with real web calls. Nothing
+    # else changes: the simulator tests what callers get. In production this is None.
+    if (sim := ctx.simulation_context()) is not None:
+        # session.start connects the room while the greeting starts, which saves time on real
+        # calls. A text simulation has no audio to wait for, so the greeting could reach the
+        # room before it was connected ("cannot access local participant before connecting",
+        # local runs, 2026-10-25). Connecting first, as LiveKit's simulation example does.
+        await ctx.connect()
+        text = sim.simulation_mode == SimulationMode.SIMULATION_MODE_TEXT
+        channel = "sim_text" if text else "sim_audio"
+        at = scenarios.scenario_now(sim.userdata(), tools.TZ)
+        tools.start_simulation(call_id, Path(tempfile.mkdtemp(prefix="riley-sim-")), at)
+
+        async def end_simulation() -> None:
+            tools.end_simulation(call_id)
+
+        ctx.add_shutdown_callback(end_simulation)
+        logger.info("simulated call", extra={"scenario": sim.scenario.label, "now": at.isoformat()})
 
     state = CallState(call_id=call_id)  # everything Riley learns on this call; tools write it
 
@@ -209,7 +286,7 @@ async def entrypoint(ctx: JobContext) -> None:
         # What TTS hears: LiveKit's markdown and emoji filters (the defaults, kept); no second
         # acknowledgement after tools.py's spoken "Got it." (first, so a dropped "Thanks,
         # Jordan." doesn't use up the name); the caller's name at most once per call; then
-        # numbers spoken the way people say them. The transcript keeps the model's words.
+        # numbers spoken the way people say them. The transcript gets the first two too (Riley).
         tts_text_transforms=[
             "filter_markdown",
             "filter_emoji",
@@ -342,8 +419,44 @@ async def entrypoint(ctx: JobContext) -> None:
         )
         finishing = asyncio.create_task(finish_call(f"session closed: {ev.reason}"))
 
+    # The transcript gets its own guards (NameGuard keeps per-call state), fed the same text.
+    transcript = [LeadingAckGuard(lambda: state.acknowledged), NameGuard(lambda: state.first_name)]
+    agent = Riley(transcript_transforms=transcript)
+
+    # --- Hanging up under an agent simulation --------------------------------------------
+    # The simulator collects check_final_state's verdict over a link that closes with the
+    # session, so when Riley hangs up, a wrong final state never reached it: the run was
+    # graded on the transcript alone (first simulation runs, 2026-10-25; livekit-agents
+    # 1.8.8). Every hang-up (end_call, a gate, silence, the time limit) goes through
+    # session.shutdown, so in a simulation it checks first:
+    # - final state right: hang up exactly as in production. Nothing to report, and the
+    #   judge sees the same ending callers get.
+    # - final state wrong: keep the line open and stop answering, so the simulator ends the
+    #   call and check_final_state fails the run. (Leaving it open every time made the judge
+    #   fail right endings: the simulated caller kept talking to a silent Riley.)
+    if sim is not None:
+        expected = sim.userdata().get("expected")
+        hang_up_for_real = session.shutdown
+        hung_up = False
+
+        def hang_up(*, drain: bool = True) -> None:
+            nonlocal hung_up
+            if scenarios.final_state_failure(expected, state) is None:
+                hang_up_for_real(drain=drain)
+                return
+            if hung_up:
+                return
+            hung_up = True
+            silence.stop()
+            if limit_task is not None:
+                limit_task.cancel()
+            logger.info("wrong final state: line left open for the simulator to grade")
+
+        session.shutdown = hang_up  # type: ignore[method-assign]
+        agent = SimulatedRiley(lambda: hung_up, transcript_transforms=transcript)
+
     await session.start(
-        agent=Riley(),
+        agent=agent,
         room=ctx.room,
         room_options=room_io.RoomOptions(
             audio_input=room_io.AudioInputOptions(

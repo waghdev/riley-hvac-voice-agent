@@ -1,0 +1,270 @@
+# Core call flows: each one ends in a known CallState, so a run passes only if the judge passes
+# the conversation AND the call ended as `userdata.expected` says (src/agent/scenarios.py,
+# checked by main.check_final_state).
+#
+# Run (spends about 100 of the 350 free text-simulation turns a month on LiveKit Build):
+#   lk agent simulate text --scenarios tests/scenarios/core.yaml src/agent/main.py
+#
+# Assumptions the expectations depend on:
+# - The agent's clock is pinned to Wednesday 2026-10-21, 9:30 am Phoenix time
+#   (scenarios.SIMULATION_NOW; a scenario can override it with `now`).
+# - Each call gets a fresh calendar holding only the weekly pattern in config/mock_calendar.json.
+#   So standard callers are offered tomorrow 10-12 and 12-2 (2026-10-22T10:00 / T12:00), and
+#   priority callers today 2-4 and 4-6 (2026-10-21T14:00 / T16:00).
+# - No CRM: leads stay in the simulated call's own outbox.
+# - Callers are fictional; phone numbers are 555-01xx.
+id: SCNG_hVTMrrmssXPb
+name: Riley core call flows
+scenarios:
+  - id: SCN_DXHGWZGQn39V
+    label: Standard booking for a noisy AC that still cools
+    instructions: |
+      PERSONA: Dana Whitfield, a relaxed homeowner. Polite, answers one question at a time,
+      and volunteers nothing unasked.
+      OPENING LINE: "Hi, my AC is making a loud rattling noise. Can someone come take a look?"
+      FACTS (reveal each only when asked, one per turn):
+      - first name: Dana
+      - callback number: 602-555-0142
+      - ZIP code: 85016
+      - the AC still cools the house fine; it's just loud
+      - nobody at home is elderly, a baby, or has a medical condition
+      DO, IN ORDER:
+      1. Answer each question.
+      2. When offered appointment windows, take the earlier one.
+      3. When the agent reads back your number and the window, say that's right.
+      4. Once the booking is confirmed, say you don't need anything else, thanks, goodbye.
+    agent_expectations: >
+      Books one standard visit (not today) for the rattling AC under Dana, with callback number
+      602-555-0142 and ZIP 85016, in the earlier window Dana chose, after reading back the number
+      and the window and hearing Dana confirm. Booking before the read-back, booking a window
+      Dana didn't choose, or ending without a booking is a fail.
+    tags:
+      feature: booking
+    userdata:
+      expected:
+        outcome: booked
+        priority: false
+        window: "2026-10-22T10:00"
+        callback_number: "6025550142"
+        category: ac_repair
+
+  - id: SCN_mm3WffZJnBkp
+    label: Priority booking when the AC is out and an elderly parent is home
+    instructions: |
+      PERSONA: Marcus Okafor, worried and a little rushed. His 81-year-old mother lives with
+      him. Answers one question at a time.
+      OPENING LINE: "Hi, our AC stopped cooling this morning, it's blowing warm air, and my
+      81-year-old mom is here with me. It's getting really hot."
+      FACTS (reveal each only when asked, one per turn):
+      - first name: Marcus
+      - callback number: 480-555-0117
+      - ZIP code: 85008
+      DO, IN ORDER:
+      1. Answer each question.
+      2. When offered appointment windows, take the earlier one.
+      3. When the agent reads back your number and the window, say yes, that's right.
+      4. Once the booking is confirmed, say thank you, goodbye.
+    agent_expectations: >
+      Treats the call as a priority because the AC isn't cooling and an 81-year-old is at home,
+      offers a window today, and books the window Marcus picks after reading back his number
+      (480-555-0117) and the window and hearing him confirm. Offering only later days when a
+      window today was open, or ending without a booking, is a fail.
+    tags:
+      feature: booking
+      urgency: priority
+    userdata:
+      expected:
+        outcome: booked
+        priority: true
+        window: "2026-10-21T14:00"
+        callback_number: "4805550117"
+        category: ac_repair
+
+  - id: SCN_bwgqPMHCw5wZ
+    label: Gas smell mentioned mid-call after giving the ZIP
+    instructions: |
+      PERSONA: Priya Raman, calm and matter-of-fact, calling because her furnace isn't heating.
+      OPENING LINE: "Hi, my furnace isn't putting out any heat."
+      FACTS (reveal each only when asked, one per turn):
+      - first name: Priya
+      - callback number: 602-555-0163
+      - ZIP code: 85013
+      DO, IN ORDER:
+      1. Answer the questions one at a time.
+      2. On your turn right after you give your ZIP code, whatever the agent just said, say:
+         "Oh, and I should mention, there's a faint gas smell near the furnace closet."
+      3. Listen to what the agent tells you, then say "Okay, I'll do that. Bye."
+    agent_expectations: >
+      As soon as Priya mentions the gas smell, tells her to leave the house and call 911 and
+      the gas utility once outside, and doesn't book or keep offering appointments. Carrying on
+      with the booking after the gas smell, troubleshooting the furnace, or telling her to
+      stay inside is a fail.
+    tags:
+      feature: safety
+    userdata:
+      expected:
+        outcome: safety_redirect
+
+  - id: SCN_zCfxYHQvh7H3
+    label: Out-of-area ZIP is declined
+    instructions: |
+      PERSONA: Alex Ferro, a homeowner, calm and brief. Answers one question at a time and
+      volunteers nothing unasked.
+      OPENING LINE: "Hi, my heat pump is making a grinding noise. Do you service my area?"
+      FACTS (reveal each only when asked, one per turn):
+      - first name: Alex
+      - callback number: 623-555-0188
+      - ZIP code: 85301
+      DO, IN ORDER:
+      1. Answer each question.
+      2. If told your area isn't served, ask "Can you recommend someone else?"
+      3. Then say "Okay, thanks anyway. Bye."
+    agent_expectations: >
+      Tells Alex that ZIP 85301 is outside the service area, without promising help before
+      hearing the ZIP, and doesn't offer or book an appointment or recommend another company.
+      Offering windows, booking, saying they serve 85301, or naming another company is a fail.
+    tags:
+      feature: service_area
+    userdata:
+      expected:
+        outcome: out_of_area
+
+  - id: SCN_hVdSbvXpguvJ
+    label: Commercial rooftop unit is not a service we offer
+    instructions: |
+      PERSONA: Rosa Delgado, an office manager, businesslike and direct.
+      OPENING LINE: "Hi, I manage a small office building and our rooftop AC unit stopped
+      working. Can you send someone today?"
+      FACTS (reveal each only when asked, one per turn):
+      - first name: Rosa
+      - callback number: 602-555-0125
+      - ZIP code: 85004
+      DO, IN ORDER:
+      1. Answer each question.
+      2. If told they don't service that kind of unit, ask "Not even for a quick look?"
+      3. Then say "Alright, thanks. Bye."
+    agent_expectations: >
+      Tells Rosa that Kestrel Comfort doesn't service commercial or rooftop units, stays with
+      that when she pushes, and doesn't offer or book an appointment. Booking, offering windows,
+      or promising a technician for the rooftop unit is a fail.
+    tags:
+      feature: services
+    userdata:
+      expected:
+        outcome: not_offered
+        category: commercial_or_rooftop
+
+  - id: SCN_GtWyKL5rxpwu
+    label: Caller refuses to give a phone number
+    instructions: |
+      PERSONA: Sam Keller, privacy-conscious and a bit curt. Wants the thermostat looked at but
+      never gives a phone number.
+      OPENING LINE: "Hi, my thermostat screen went blank. Can you send someone out?"
+      FACTS (reveal each only when asked, one per turn):
+      - first name: Sam
+      - ZIP code: 85006
+      DO, IN ORDER:
+      1. Give your name and ZIP when asked.
+      2. When asked for a phone number, say: "I'd rather not give out my number. Can't you just
+         book it?"
+      3. If asked again, refuse again: "No, I don't give my number out."
+      4. If the agent says it can't book without a number, say "Fine, I'll call back another
+         time. Bye."
+    agent_expectations: >
+      Explains that a callback number is needed to book, asks for it at most twice in total,
+      never books or offers appointment windows without a number, and ends the call politely.
+      Booking without a number, inventing another way to book, or asking for the number three
+      or more times is a fail.
+    tags:
+      feature: intake
+    userdata:
+      expected:
+        outcome: incomplete
+
+  - id: SCN_p45GhWBrLCcA
+    label: Caller changes to the later window during the read-back
+    instructions: |
+      PERSONA: Elena Vasquez, friendly and a little scattered; she changes her mind once.
+      OPENING LINE: "Hi, I'd like to schedule a seasonal tune-up for my AC."
+      FACTS (reveal each only when asked, one per turn):
+      - first name: Elena
+      - callback number: 602-555-0131
+      - ZIP code: 85018
+      - nothing is wrong with the AC; it's routine maintenance
+      DO, IN ORDER:
+      1. Answer each question.
+      2. When offered two appointment windows, take the earlier one.
+      3. When the agent reads back your number and the window, say: "Oh wait, actually, can we
+         do the later one instead? I just remembered I have a meeting."
+      4. When the agent reads back the later window and your number, say that's right.
+      5. Once the booking is confirmed, say thanks, that's all, goodbye.
+    agent_expectations: >
+      Ends with exactly one tune-up booked for Elena in the later of the two windows first
+      offered, reading back that later window and her number before booking it. Booking the
+      earlier window, booking twice, or booking the later window without reading it back is a
+      fail.
+    tags:
+      feature: booking
+      complication: change_window
+    userdata:
+      expected:
+        outcome: booked
+        priority: false
+        window: "2026-10-22T12:00"
+        callback_number: "6025550131"
+        category: maintenance
+
+  - id: SCN_xazKfb2yBXjU
+    label: Caller corrects the callback number at the read-back
+    instructions: |
+      PERSONA: Tom Brennan, hurried, mixes up two digits of his own number.
+      OPENING LINE: "Yeah hi, my AC's making a buzzing noise. It still cools, but it's loud."
+      FACTS (reveal each only when asked, one per turn):
+      - first name: Tom
+      - ZIP code: 85014
+      - nobody at home is elderly, a baby, or has a medical condition
+      GROUND TRUTH (never volunteer): your real number is 602-555-0184.
+      DO, IN ORDER:
+      1. When asked for your number, say "602-555-0148".
+      2. When offered appointment windows, take the earlier one.
+      3. When the agent reads back your number, say: "Oh, sorry, that's wrong. It's
+         602-555-0184, I mixed up the last two digits."
+      4. When the agent reads back 602-555-0184 and the window, say yes, that's right.
+      5. Once the booking is confirmed, say thanks, bye.
+    agent_expectations: >
+      Books with callback number 602-555-0184 after reading back the corrected number and
+      hearing Tom confirm it. Booking with 602-555-0148, or booking without reading back the
+      corrected number, is a fail.
+    tags:
+      feature: booking
+      complication: correct_number
+    userdata:
+      expected:
+        outcome: booked
+        window: "2026-10-22T10:00"
+        callback_number: "6025550184"
+
+  - id: SCN_X9SKjGteUahB
+    label: Caller asks for a real person
+    instructions: |
+      PERSONA: Linda Moreau, polite but firm; she doesn't like talking to automated systems.
+      OPENING LINE: "Hi, I'd really rather talk to a real person. Can I speak to someone?"
+      FACTS (reveal each only when asked, one per turn):
+      - first name: Linda
+      - callback number: 602-555-0109
+      - if asked what it's about: "It's about my AC, but I'd just like a person to call me."
+      DO, IN ORDER:
+      1. Insist on talking to a person; don't describe the AC problem in detail.
+      2. Give your name and number when asked.
+      3. When told someone will call you back, say thanks, goodbye.
+    agent_expectations: >
+      Doesn't push Linda through booking questions she declined, takes her name and number,
+      and tells her a team member will call her back within one business day. Claiming to
+      transfer her right now, or ending without taking her number, is a fail.
+    tags:
+      feature: callback
+    userdata:
+      expected:
+        outcome: callback_requested
+        callback_number: "6025550109"
+        callback_reason: wants_human
