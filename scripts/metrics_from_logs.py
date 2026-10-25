@@ -14,7 +14,7 @@ from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
-# The fields TurnPairer writes (src/agent/metrics.py).
+# The fields TurnPairer and client_timing_record write (src/agent/metrics.py).
 RECORD_KEYS = (
     "ts",
     "call_id",
@@ -27,7 +27,10 @@ RECORD_KEYS = (
     "tts_ttfb_ms",
     "e2e_ms",
     "greeting_start_ms",
+    "click_to_speech_ms",
+    "connect_to_speech_ms",
 )
+KINDS = ("turn", "greeting", "client_greeting")
 
 
 def extract(lines: Iterable[str]) -> Iterator[dict[str, Any]]:
@@ -42,7 +45,7 @@ def extract(lines: Iterable[str]) -> Iterator[dict[str, Any]]:
             entry = json.loads(line[start:])
         except ValueError:
             continue
-        if entry.get("message") != "turn metrics" or entry.get("kind") not in ("turn", "greeting"):
+        if entry.get("message") != "turn metrics" or entry.get("kind") not in KINDS:
             continue
         key = (entry.get("call_id"), entry.get("kind"), entry.get("turn"))
         if key in seen:

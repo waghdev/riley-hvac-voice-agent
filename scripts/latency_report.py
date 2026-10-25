@@ -23,6 +23,12 @@ STAGES = {
     "tts_ttfb_ms": "TTS first audio",
     "e2e_ms": "Total response",
 }
+# The greeting, from the agent's side and (web) from the browser's, where the caller waits.
+GREETING_ROWS = {
+    "greeting_start_ms": "Greeting start after session start (agent)",
+    "connect_to_speech_ms": "Greeting: call connected to first words (browser)",
+    "click_to_speech_ms": "Greeting: Call button to first words (browser)",
+}
 CHANNEL_ORDER = ["web", "phone", "console"]  # web is the headline
 
 
@@ -58,6 +64,10 @@ def summarize(records: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
                     ch["values"][key].append(r[key])
         elif r.get("kind") == "greeting" and r.get("greeting_start_ms") is not None:
             ch["values"]["greeting_start_ms"].append(r["greeting_start_ms"])
+        elif r.get("kind") == "client_greeting":
+            for key in GREETING_ROWS:
+                if r.get(key) is not None:
+                    ch["values"][key].append(r[key])
     return dict(by_channel)
 
 
@@ -72,7 +82,7 @@ def to_markdown(summary: dict[str, dict[str, Any]]) -> str:
         out.append(f"### {channel}: {len(ch['calls'])} calls, {ch['turns']} turns\n")
         out.append("| Stage | p50 | p90 | n |")
         out.append("| --- | ---: | ---: | ---: |")
-        rows = [*STAGES.items(), ("greeting_start_ms", "Greeting start after session start")]
+        rows = [*STAGES.items(), *GREETING_ROWS.items()]
         for key, label in rows:
             values = ch["values"].get(key, [])
             if values:

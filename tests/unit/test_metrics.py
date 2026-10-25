@@ -97,3 +97,39 @@ def test_sdk_e2e_wins_when_present(pairer):
     pairer.add("user", {"stopped_speaking_at": START + 10.0})
     record = pairer.add("assistant", {"e2e_latency": 0.9, "started_speaking_at": START + 11.5})
     assert record["e2e_ms"] == 900.0
+
+
+# --- The web page's greeting measurement --------------------------------------------------
+
+
+def test_a_valid_client_timing_becomes_a_client_greeting_record():
+    from agent.metrics import client_timing_record
+
+    text = '{"click_to_speech_ms": 3120, "connect_to_speech_ms": 1480}'
+    assert client_timing_record(text, "c1", "web", now=1000.0) == {
+        "ts": 1000.0,
+        "call_id": "c1",
+        "channel": "web",
+        "kind": "client_greeting",
+        "click_to_speech_ms": 3120,
+        "connect_to_speech_ms": 1480,
+    }
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "not json",
+        "[1, 2]",
+        '{"click_to_speech_ms": 3120}',  # a field missing
+        '{"click_to_speech_ms": "3120", "connect_to_speech_ms": 1480}',  # a string
+        '{"click_to_speech_ms": 31.5, "connect_to_speech_ms": 1480}',  # not whole ms
+        '{"click_to_speech_ms": true, "connect_to_speech_ms": 1480}',  # bool is an int subclass
+        '{"click_to_speech_ms": -5, "connect_to_speech_ms": 1480}',
+        '{"click_to_speech_ms": 999999, "connect_to_speech_ms": 1480}',  # implausible
+    ],
+)
+def test_anything_else_from_the_browser_is_ignored(text):
+    from agent.metrics import client_timing_record
+
+    assert client_timing_record(text, "c1", "web") is None

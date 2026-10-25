@@ -41,7 +41,7 @@ from livekit.plugins import ai_coustics, deepgram
 from agent import prompts, tools
 from agent.clips import Clip, load_clip
 from agent.config import DEFAULT_TTS_VOICE, REPO_ROOT, load_business
-from agent.metrics import JsonlWriter, TurnPairer
+from agent.metrics import CLIENT_TIMING_TOPIC, JsonlWriter, TurnPairer, client_timing_record
 from agent.silence import SilenceMonitor
 from agent.spoken import LeadingAckGuard, NameGuard, speak_numbers_stream
 from agent.state import CallState, Outcome
@@ -271,6 +271,24 @@ async def entrypoint(ctx: JobContext) -> None:
         if record:
             writer.write(record)
             logger.info("turn metrics", extra=record)
+
+    # --- The web page's own measurement of the greeting (what the caller waited) --------
+    timing_reads: set[asyncio.Task[None]] = set()
+
+    async def read_client_timing(reader: rtc.TextStreamReader) -> None:
+        record = client_timing_record(await reader.read_all(), call_id, channel)
+        if record is None:
+            logger.info("client timing ignored: not a valid measurement")
+            return
+        writer.write(record)
+        logger.info("turn metrics", extra=record)  # same log line, so metrics_from_logs finds it
+
+    def on_client_timing(reader: rtc.TextStreamReader, participant_identity: str) -> None:
+        task = asyncio.create_task(read_client_timing(reader))
+        timing_reads.add(task)  # a reference, so the task isn't garbage-collected mid-read
+        task.add_done_callback(timing_reads.discard)
+
+    ctx.room.register_text_stream_handler(CLIENT_TIMING_TOPIC, on_client_timing)
 
     # --- Maximum call length, to protect the free quotas --------------------------------
     async def time_limit() -> None:

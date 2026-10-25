@@ -89,6 +89,40 @@ class TurnPairer:
         return record
 
 
+# The web page measures the greeting where the caller experiences it and sends it on this text
+# stream topic (web/hooks/useGreetingTiming.ts): call connected -> Riley starts speaking.
+CLIENT_TIMING_TOPIC = "riley.client_timing"
+CLIENT_TIMING_FIELDS = ("click_to_speech_ms", "connect_to_speech_ms")
+_MAX_PLAUSIBLE_MS = 120_000
+
+
+def client_timing_record(
+    text: str, call_id: str, channel: str, now: float | None = None
+) -> dict[str, Any] | None:
+    """A "client_greeting" record from the page's message, or None if it isn't valid.
+
+    The text comes from the visitor's browser, so it's checked like any input: JSON with both
+    fields as whole milliseconds in a plausible range.
+    """
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(data, dict):
+        return None
+    values = [data.get(field) for field in CLIENT_TIMING_FIELDS]
+    if not all(type(v) is int and 0 <= v <= _MAX_PLAUSIBLE_MS for v in values):
+        return None
+    record: dict[str, Any] = {
+        "ts": round(now if now is not None else time.time(), 3),
+        "call_id": call_id,
+        "channel": channel,
+        "kind": "client_greeting",
+    }
+    record.update(zip(CLIENT_TIMING_FIELDS, values, strict=True))
+    return record
+
+
 class JsonlWriter:
     """Appends records to metrics/<UTC date>.jsonl."""
 

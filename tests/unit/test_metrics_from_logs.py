@@ -72,3 +72,14 @@ def test_lines_replayed_by_a_reconnect_are_counted_once():
         ("turn", 1),
         ("turn", 2),
     ]
+
+
+def test_keeps_the_browser_greeting_measurement():
+    line = json.dumps(
+        {"message": "turn metrics", "level": "INFO", "kind": "client_greeting", "call_id": "c1",
+         "channel": "web", "ts": 1.0, "click_to_speech_ms": 3000, "connect_to_speech_ms": 1400}
+    )  # fmt: skip
+    assert list(extract([line])) == [
+        {"ts": 1.0, "call_id": "c1", "channel": "web", "kind": "client_greeting",
+         "click_to_speech_ms": 3000, "connect_to_speech_ms": 1400}
+    ]  # fmt: skip

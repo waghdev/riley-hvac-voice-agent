@@ -74,3 +74,16 @@ def test_load_records_skips_blank_lines(tmp_path):
     path = tmp_path / "m.jsonl"
     path.write_text(json.dumps(turn("a", e2e_ms=1.0)) + "\n\n", encoding="utf-8")
     assert len(load_records([path])) == 1
+
+
+def test_the_browser_greeting_measurement_gets_its_own_rows():
+    records = [
+        {"call_id": "a", "channel": "web", "kind": "client_greeting", "click_to_speech_ms": 3000,
+         "connect_to_speech_ms": 1400},
+        {"call_id": "b", "channel": "web", "kind": "client_greeting", "click_to_speech_ms": 3400,
+         "connect_to_speech_ms": 1800},
+    ]  # fmt: skip
+    table = to_markdown(summarize(records))
+    connected = "| Greeting: call connected to first words (browser) | 1,400 ms | 1,800 ms | 2 |"
+    assert connected in table
+    assert "| Greeting: Call button to first words (browser) | 3,000 ms | 3,400 ms | 2 |" in table
