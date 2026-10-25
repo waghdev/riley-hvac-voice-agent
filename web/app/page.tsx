@@ -11,5 +11,7 @@ export default function Page() {
   const siteKey =
     process.env.TURNSTILE_SITE_KEY ||
     (process.env.NODE_ENV === 'development' ? TEST_SITE_KEY : 'missing-site-key');
-  return <App turnstileSiteKey={siteKey} />;
+  // The LiveKit URL isn't secret (every token response includes it); the page uses it to warm up
+  // the connection before the visitor presses Call.
+  return <App turnstileSiteKey={siteKey} livekitUrl={process.env.LIVEKIT_URL} />;
 }

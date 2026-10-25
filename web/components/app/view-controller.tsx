@@ -4,6 +4,7 @@ import { useTheme } from 'next-themes';
 import { AnimatePresence, motion } from 'motion/react';
 import { useAgent, useSessionContext } from '@livekit/components-react';
 import { AgentSessionView_01 } from '@/components/agents-ui/blocks/agent-session-view-01';
+import { ORB_COLOR } from '@/components/app/hero-orb';
 import { WelcomeView } from '@/components/app/welcome-view';
 import { useGreetingTiming } from '@/hooks/useGreetingTiming';
 
@@ -33,6 +34,7 @@ interface ViewControllerProps {
   onTurnstileToken: (token: string | null) => void;
   turnstileReset: number;
   canStart: boolean;
+  starting: boolean;
   refusal: string | null;
   onStartCall: () => void;
   clickedAt: number | null;
@@ -58,14 +60,18 @@ export function ViewController({ clickedAt, ...welcome }: ViewControllerProps) {
           supportsVideoInput={false}
           supportsScreenShare={false}
           isPreConnectBufferEnabled={true}
-          themeMode={resolvedTheme === 'dark' ? 'dark' : 'light'}
+          // The landing page's orb, now reacting to Riley's voice.
+          audioVisualizerType="aura"
+          audioVisualizerColor={ORB_COLOR}
+          audioVisualizerColorShift={0.35}
+          themeMode={resolvedTheme === 'light' ? 'light' : 'dark'}
           className="fixed inset-0"
         />
       )}
       {isConnected && timing && (
         <p
           key="timing"
-          className="text-muted-foreground fixed top-4 left-1/2 z-50 -translate-x-1/2 font-mono text-xs"
+          className="text-muted-foreground fixed top-16 left-1/2 z-50 -translate-x-1/2 font-mono text-xs whitespace-nowrap md:top-6"
         >
           Riley picked up {(timing.connectToSpeechMs / 1000).toFixed(1)} s after connecting
         </p>

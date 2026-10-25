@@ -1,5 +1,6 @@
 import { Public_Sans } from 'next/font/google';
 import localFont from 'next/font/local';
+import { SocialLinks } from '@/components/app/social-links';
 import { ThemeProvider } from '@/components/app/theme-provider';
 import { ThemeToggle } from '@/components/app/theme-toggle';
 import { cn } from '@/lib/shadcn/utils';
@@ -66,21 +67,11 @@ export default function RootLayout({ children }: RootLayoutProps) {
           enableSystem
           disableTransitionOnChange
         >
-          <header className="fixed top-0 left-0 z-50 hidden w-full flex-row justify-between p-6 md:flex">
+          <header className="bg-background/60 fixed top-0 left-0 z-50 flex w-full flex-row items-center justify-between px-4 py-2 backdrop-blur-md md:px-6 md:py-3">
             <span className="text-foreground font-mono text-xs font-bold tracking-wider uppercase">
-              Demo by Dev Wagh · Scaile AI
+              Kestrel Comfort <span className="text-muted-foreground">· demo</span>
             </span>
-            <span className="text-foreground font-mono text-xs font-bold tracking-wider uppercase">
-              Built with{' '}
-              <a
-                target="_blank"
-                rel="noopener noreferrer"
-                href="https://docs.livekit.io/agents"
-                className="underline underline-offset-4"
-              >
-                LiveKit Agents
-              </a>
-            </span>
+            <SocialLinks />
           </header>
 
           {children}

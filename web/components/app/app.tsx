@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { TokenSource } from 'livekit-client';
 import { useSession } from '@livekit/components-react';
 import { WarningIcon } from '@phosphor-icons/react/dist/ssr';
@@ -10,6 +10,7 @@ import { ViewController } from '@/components/app/view-controller';
 import { Toaster } from '@/components/ui/sonner';
 import { useAgentErrors } from '@/hooks/useAgentErrors';
 import { useDebugMode } from '@/hooks/useDebug';
+import { CallRefused, createCallTokenSource } from '@/lib/call-token-source';
 import { refusalMessage } from '@/lib/refusals';
 
 const IN_DEVELOPMENT = process.env.NODE_ENV !== 'production';
@@ -21,14 +22,13 @@ function AppSetup() {
   return null;
 }
 
-/** Thrown by the token source when /api/token refuses, so start() fails without a toast. */
-class CallRefused extends Error {}
-
 interface AppProps {
   turnstileSiteKey: string;
+  /** The LiveKit server URL (public: it's in every token response), for the connection warm-up. */
+  livekitUrl?: string;
 }
 
-export function App({ turnstileSiteKey }: AppProps) {
+export function App({ turnstileSiteKey, livekitUrl }: AppProps) {
   // The Turnstile token is single-use: held in a ref for the token source, mirrored in state
   // so the start button knows when it may be pressed.
   const turnstileToken = useRef<string | null>(null);
@@ -36,57 +36,62 @@ export function App({ turnstileSiteKey }: AppProps) {
   const [turnstileReset, setTurnstileReset] = useState(0);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [clickedAt, setClickedAt] = useState<number | null>(null);
+  const [starting, setStarting] = useState(false);
 
   const onTurnstileToken = useCallback((token: string | null) => {
     turnstileToken.current = token;
     setHasTurnstileToken(token !== null);
   }, []);
 
-  // TokenSource.literal with a function: a fresh request for every call, no caching. (A cached
-  // token, as TokenSource.custom/endpoint keep, could rejoin a room and skip the checks.)
-  const tokenSource = useMemo(
+  // Only the Call button may ask /api/token for a token (see lib/call-token-source.ts).
+  const calls = useMemo(
     () =>
-      TokenSource.literal(async () => {
-        const token = turnstileToken.current;
-        turnstileToken.current = null; // spent, whatever the answer
-        setHasTurnstileToken(false);
-        setTurnstileReset((n) => n + 1);
-        const res = await fetch('/api/token', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ turnstile_token: token }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          setRefusal(refusalMessage(data.error));
-          throw new CallRefused(String(data.error));
-        }
-        return { serverUrl: data.server_url, participantToken: data.participant_token };
+      createCallTokenSource({
+        turnstileToken: () => turnstileToken.current,
+        onTurnstileSpent: () => {
+          turnstileToken.current = null;
+          setHasTurnstileToken(false);
+          setTurnstileReset((n) => n + 1);
+        },
       }),
     []
   );
+  const tokenSource = useMemo(() => TokenSource.literal(() => calls.fetch()), [calls]);
 
   const session = useSession(tokenSource);
+
+  // Our own warm-up, since the hook's needs a token: DNS, TLS and the region lookup for the
+  // LiveKit server happen while the visitor reads the page, not after they press Call.
+  const { room } = session;
+  useEffect(() => {
+    if (livekitUrl) room.prepareConnection(livekitUrl).catch(() => {});
+  }, [room, livekitUrl]);
 
   const startCall = useCallback(async () => {
     setRefusal(null);
     setClickedAt(performance.now());
+    setStarting(true);
+    calls.request();
     try {
       await session.start();
     } catch (error) {
-      if (!(error instanceof CallRefused)) setRefusal(refusalMessage('unavailable'));
+      setRefusal(refusalMessage(error instanceof CallRefused ? error.code : 'unavailable'));
+    } finally {
+      calls.cancel();
+      setStarting(false);
     }
-  }, [session]);
+  }, [session, calls]);
 
   return (
     <AgentSessionProvider session={session}>
       <AppSetup />
-      <main className="grid h-svh grid-cols-1 place-content-center">
+      <main className="min-h-svh">
         <ViewController
           turnstileSiteKey={turnstileSiteKey}
           onTurnstileToken={onTurnstileToken}
           turnstileReset={turnstileReset}
           canStart={hasTurnstileToken}
+          starting={starting}
           refusal={refusal}
           onStartCall={startCall}
           clickedAt={clickedAt}
