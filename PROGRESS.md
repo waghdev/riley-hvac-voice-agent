@@ -4,8 +4,7 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
 
 ## Current state
 
-- **Milestone:** M3 built, tested and deployed (2026-10-22); it closes after Dev's test calls.
-  Next: M4 Web call page.
+- **Milestone:** M3 done (2026-10-25). Next: M4 Web call page.
 - **Location:** `C:\Users\Devendra\Projects\Riley - HVAC`. Repo: https://github.com/waghdev/voice-agent-reference
   (private until M7). LiveKit project: `riley-kestrel-comfort-heating-a` (Build).
 - **Stack as built:** Deepgram `nova-3` STT + Aura-2 TTS (Dev's key), LLM
@@ -13,10 +12,8 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
   bundled Silero VAD, ai-coustics `QUAIL_L`.
 - **Deployed:** `riley` runs on LiveKit Cloud in `us-east` (Build plan), so latency can be measured
   the way visitors will get it. Office ambience and keyboard typing are on.
-- **Next step:** Dev test-calls the deployed agent in Agent Console and books an appointment:
-  Riley offers two windows, reads back the number and the window, and books on a yes. Worth
-  trying: changing the window after the read-back, correcting the number, asking for "anything
-  Friday afternoon", and "just book it" without confirming. Then M4.
+- **Next step:** M4: agree the web page design with Dev (starter, token endpoint, abuse limits,
+  where the rate-limit counters live), then Dev creates the Vercel and Cloudflare accounts.
 - **Calendar and leads in the cloud:** SQLite files inside the container, reset on each deploy.
   No CRM is reachable from the cloud, so leads wait in the container's outbox (by design; see
   decisions.md). Locally: `uv run uvicorn mock_crm.app:from_env --factory --port 8080`.
@@ -63,8 +60,8 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
 - [x] M0 Setup (2026-10-20)
 - [x] M1 Talking agent (2026-10-21; latency gaps above carried into M2/M4)
 - [x] M2 Decision layer (2026-10-22; 244 unit + 11 behavior tests; latency gap accepted by Dev)
-- [ ] M3 Booking and CRM (built and deployed 2026-10-22; 353 unit + 20 behavior tests; closes
-      after Dev's test calls)
+- [x] M3 Booking and CRM (2026-10-25; 353 unit + 20 behavior tests; Dev's booking call "sounds
+      right")
 - [ ] M4 Web call page
 - [ ] M5 Evals and quality
 - [ ] M6 Phone
@@ -133,6 +130,10 @@ Gemini rate-limit hits). Target: $0.
   scaileai.com; check Vercel Hobby terms first).
 
 ## Session log
+
+### 2026-10-25: M3 closed
+
+- Dev booked an appointment on the deployed agent in Agent Console: "sounds right".
 
 ### 2026-10-22: M3 booking and CRM built and deployed
 
