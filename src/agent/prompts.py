@@ -13,6 +13,12 @@ END_CALL_RESULT = "The call is ending. Say one short goodbye now. Do not call en
 ACKNOWLEDGEMENTS = ("Got it.", "Okay.", "Thanks.")
 # Played when the calendar takes over a second (tools.py), so the caller isn't left in silence.
 CHECKING_SCHEDULE = "One sec, checking the schedule."
+# Said when the session can't go on: an unrecoverable model error, such as the free LLM credit
+# running out. Pre-rendered (scripts/make_audio_clips.py), so it plays even if TTS is what failed.
+SERVICE_UNAVAILABLE = (
+    "I'm sorry, I'm having trouble on my end right now. Please try again in a little while. "
+    "Goodbye."
+)
 TIME_LIMIT_GOODBYE = (
     "I'm sorry, I need to wrap up this call now. "
     "Please call back and we'll pick up where we left off. Goodbye."

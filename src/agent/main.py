@@ -12,7 +12,7 @@ import asyncio
 import logging
 import os
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -26,6 +26,7 @@ from livekit.agents import (
     BuiltinAudioClip,
     CloseEvent,
     ConversationItemAddedEvent,
+    ErrorEvent,
     JobContext,
     TurnHandlingOptions,
     UserStateChangedEvent,
@@ -38,8 +39,8 @@ from livekit.agents.llm import ChatMessage
 from livekit.plugins import ai_coustics, deepgram
 
 from agent import prompts, tools
+from agent.clips import Clip, load_clip
 from agent.config import DEFAULT_TTS_VOICE, REPO_ROOT, load_business
-from agent.greeting_audio import GreetingClip, load_greeting
 from agent.metrics import JsonlWriter, TurnPairer
 from agent.silence import SilenceMonitor
 from agent.spoken import LeadingAckGuard, NameGuard, speak_numbers_stream
@@ -51,11 +52,13 @@ logger = logging.getLogger("riley")
 BUSINESS = load_business()
 LLM_MODEL = os.getenv("LLM_MODEL", "google/gemini-3.1-flash-lite")
 TTS_VOICE = os.getenv("TTS_VOICE", DEFAULT_TTS_VOICE)
-# Loaded once per process, so a call never waits on it. None if missing or stale (wrong text or
-# voice): Riley then speaks the greeting with live TTS instead.
-GREETING_CLIP = load_greeting(prompts.greeting(BUSINESS), TTS_VOICE)
-if GREETING_CLIP is None:
-    logger.warning("no greeting clip for this text and voice; using live TTS for the greeting")
+# Loaded once per process, so a call never waits on them. None if missing or stale (wrong text or
+# voice): Riley then says that line with live TTS instead.
+GREETING_CLIP = load_clip("greeting", prompts.greeting(BUSINESS), TTS_VOICE)
+UNAVAILABLE_CLIP = load_clip("unavailable", prompts.SERVICE_UNAVAILABLE, TTS_VOICE)
+for _name, _clip in (("greeting", GREETING_CLIP), ("unavailable", UNAVAILABLE_CLIP)):
+    if _clip is None:
+        logger.warning("no %s clip for this text and voice; using live TTS for it", _name)
 MAX_CALL_SECONDS = float(os.getenv("MAX_CALL_SECONDS", "300"))
 METRICS_DIR = Path(os.getenv("METRICS_DIR", REPO_ROOT / "metrics"))
 
@@ -98,8 +101,8 @@ def build_llm() -> inference.LLM:
     return inference.LLM(model=LLM_MODEL, extra_kwargs=extra)
 
 
-async def clip_frames(clip: GreetingClip, frame_ms: int = 20) -> AsyncIterator[rtc.AudioFrame]:
-    """The pre-rendered greeting as 20 ms audio frames, which is what say(audio=...) plays."""
+async def clip_frames(clip: Clip, frame_ms: int = 20) -> AsyncIterator[rtc.AudioFrame]:
+    """A pre-rendered clip as 20 ms audio frames, which is what say(audio=...) plays."""
     samples = clip.sample_rate * frame_ms // 1000
     step = samples * 2  # 16-bit mono: 2 bytes per sample
     for start in range(0, len(clip.pcm), step):
@@ -107,6 +110,35 @@ async def clip_frames(clip: GreetingClip, frame_ms: int = 20) -> AsyncIterator[r
         yield rtc.AudioFrame(
             data=chunk, sample_rate=clip.sample_rate, num_channels=1, samples_per_channel=samples
         )
+
+
+def close_on_fatal_error(
+    end_with: Callable[..., Awaitable[None]],
+) -> Callable[[ErrorEvent], None]:
+    """The session's "error" handler: on the first unrecoverable error, say SERVICE_UNAVAILABLE
+    and hang up (end_with does both).
+
+    Recoverable errors are retried by the SDK. An unrecoverable one means retries are exhausted
+    or the request can't succeed (LiveKit Inference refusing once the free LLM credit runs
+    out). LiveKit's docs say to say a line before the session closes, but 1.8.8 only closes
+    after 3 unrecoverable errors in a row (max_unrecoverable_errors): after one, the caller
+    heard the line and then dead air (debugger call, 2026-10-25). The line is pre-rendered, so
+    it plays even when TTS is what failed.
+    """
+    closing: list[asyncio.Task[None]] = []  # holds the task, and means "already hanging up"
+
+    def on_error(ev: ErrorEvent) -> None:
+        if ev.error.recoverable or closing:
+            return
+        source = type(ev.source).__name__
+        logger.error("unrecoverable error", extra={"source": source, "error": str(ev.error)})
+        closing.append(
+            asyncio.create_task(
+                end_with(prompts.SERVICE_UNAVAILABLE, by="error", clip=UNAVAILABLE_CLIP)
+            )
+        )
+
+    return on_error
 
 
 class Riley(Agent):
@@ -190,15 +222,20 @@ async def entrypoint(ctx: JobContext) -> None:
     pairer = TurnPairer(call_id=call_id, channel=channel, session_started_at=time.time())
     writer = JsonlWriter(METRICS_DIR)
 
-    async def end_with(line: str, by: str) -> None:
-        """Say a final line nobody can talk over, then close the session (see finish_call)."""
+    async def end_with(line: str, by: str, clip: Clip | None = None) -> None:
+        """Say a final line nobody can talk over, then close the session (see finish_call).
+        With a clip, it plays instead of TTS."""
         logger.info("hanging up", extra={"by": by})
         session.interrupt()
+        audio = clip_frames(clip) if clip is not None else None
         try:
-            await session.say(line, allow_interruptions=False)
+            await session.say(line, audio=audio, allow_interruptions=False)
         except RuntimeError:  # already closing for another reason
             return
         session.shutdown()
+
+    # A model that fails for good: say why, then hang up.
+    session.on("error", close_on_fatal_error(end_with))
 
     # --- Silence: two check-ins, then a polite close ------------------------------------
     silence = SilenceMonitor(
