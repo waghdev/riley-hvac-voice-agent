@@ -4,8 +4,8 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
 
 ## Current state
 
-- **Milestone:** M4 Web call page in progress (built and tested locally; waiting on Dev's
-  three account steps to deploy).
+- **Milestone:** M4 Web call page deployed (2026-10-25): https://riley-kestrel-comfort.vercel.app.
+  Closes after Dev's browser calls (desktop and phone).
 - **Location:** `C:\Users\Devendra\Projects\Riley - HVAC`. Repo: https://github.com/waghdev/voice-agent-reference
   (private until M7). LiveKit project: `riley-kestrel-comfort-heating-a` (Build).
 - **Stack as built:** Deepgram `nova-3` STT + Aura-2 TTS (Dev's key), LLM
@@ -13,15 +13,12 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
   bundled Silero VAD, ai-coustics `QUAIL_L`.
 - **Deployed:** `riley` runs on LiveKit Cloud in `us-east` (Build plan), so latency can be measured
   the way visitors will get it. Office ambience and keyboard typing are on.
-- **Next step:** Dev's three steps:
-  1. Run `npx vercel login` once in a terminal.
-  2. Create a Turnstile widget and put the keys in `.env`.
-  3. Create the free Upstash Redis in the Vercel project.
-
-  Then Claude sets the secrets with the CLI (from `.env`, never through chat), deploys, adds the
-  firewall rule, tests the live page, and Dev makes a few calls from the browser.
-- **Web page:** `web/` (Next.js), Vercel project `riley-kestrel-comfort` (created, not deployed
-  yet). Local: `cd web && pnpm dev` with `web/.env.local` (LiveKit values only; Turnstile and
+- **Next step:** Dev calls Riley from https://riley-kestrel-comfort.vercel.app on a laptop and a
+  phone (book an appointment once). Then Claude reads the Vercel and agent logs (call admitted,
+  counters, greeting timing) and closes M4.
+- **Web page:** `web/` (Next.js), Vercel project `riley-kestrel-comfort` (scope
+  `devs-projects-1e3f5727`), deploys on push when `web/` changes. The Vercel plugin can't see this
+  project (404), so use the CLI (`npx vercel ... --scope devs-projects-1e3f5727`). Local: `cd web && pnpm dev` with `web/.env.local` (LiveKit values only; Turnstile and
   the counters use test/in-memory stand-ins locally).
 - **Calendar and leads in the cloud:** SQLite files inside the container, reset on each deploy.
   No CRM is reachable from the cloud, so leads wait in the container's outbox (by design; see
@@ -61,11 +58,10 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
 - [x] `.env` created from `.env.example` (gitignored, `GEMINI_MODEL=gemini-3.5-flash-lite`)
 - [x] GitHub repo created, private, pushed; CI green
 - [x] (M4) Vercel account (Hobby, free): exists, connected to Claude Code's Vercel plugin
-- [ ] (M4) `npx vercel login` once (the CLI sets secrets from `.env` without them passing
-      through chat)
-- [ ] (M4) Upstash Redis, free plan, created from the Vercel project's Storage tab
-- [ ] (optional) Let Vercel's GitHub app see `voice-agent-reference`, for deploy-on-push
-- [ ] (M4) Cloudflare account; Turnstile site key and secret (free)
+- [x] (M4) `npx vercel login` (Dev); secrets set from `.env` by the CLI, never through chat
+- [x] (M4) Upstash Redis, free plan, connected to the Vercel project (Dev)
+- [x] (M4) Cloudflare Turnstile widget; keys in `.env` and Vercel (Dev)
+- [x] (M4) Vercel's GitHub app can see `voice-agent-reference`: deploy on push (Dev)
 - [ ] (M6) Claim the 1 free US local number in LiveKit Cloud
 
 ## Milestones
@@ -144,7 +140,19 @@ Gemini rate-limit hits). Target: $0.
 
 ## Session log
 
-### 2026-10-25: M4 web call page built (not deployed yet)
+### 2026-10-25: M4 web call page deployed
+
+- Dev did the account steps (Vercel CLI login, Turnstile keys, Upstash, GitHub app access).
+- Secrets copied from `.env` to Vercel by the CLI (sensitive, production); first production
+  deploy from a push, functions in iad1.
+- Live checks: page public and branded; `/api/token` refuses a missing or fake Turnstile token
+  (403), so the real secret and full config are in place; GET is 405. Firewall rule created
+  through the API (it reports "not found" until the first deploy) and confirmed: 10 requests a
+  minute pass, the 11th gets 429.
+- Not yet proven: the Upstash counters (they need a real Turnstile pass, so Dev's first browser
+  call is the test).
+
+### 2026-10-25: M4 web call page built
 
 - Dev approved the design: React starter, `/api/token` behind Turnstile, 3 calls per visitor per
   hour, 5 a day, under 4 live calls, Upstash counters, Vercel Hobby.

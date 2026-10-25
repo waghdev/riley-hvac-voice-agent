@@ -8,8 +8,11 @@ a service appointment.
 
 ## Try it
 
-TODO: "Talk to Riley" link to the public web-call page (works in any browser, no phone needed).
-Phone number for live testing, if kept active.
+**[Talk to Riley](https://riley-kestrel-comfort.vercel.app)** from any browser, no phone needed.
+Kestrel Comfort is a fictional business: use a made-up name and a 555 number. Calls are capped
+(a few per visitor per hour, five a day), since the demo runs on free tiers.
+
+TODO: phone number for live testing (M6).
 
 ## Demo
 
