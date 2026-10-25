@@ -528,7 +528,14 @@ async def book_appointment(context: RunContext[CallState]) -> dict[str, Any] | N
         logger.info("booked", extra={"booking_id": booking.booking_id, "window": booking.window_id})
         return {"booking": booking}
 
-    return await _run(context, intake.book_appointment, prepare=book)
+    out = await _run(context, intake.book_appointment, prepare=book)
+    if out is not None and out["decision"] == Decision.BOOKED.value:
+        # The one line every booked caller must hear, so code says it rather than the model:
+        # a caller who confirmed and said goodbye in one breath got only "Goodbye!" (agent
+        # simulation, 2026-10-25).
+        window = state.offered_windows.get(state.held_window or "", "")
+        _say(context, prompts.BOOKED.format(window=window), "booking confirmation")
+    return out
 
 
 ALL_TOOLS = [

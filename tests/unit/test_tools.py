@@ -228,6 +228,26 @@ async def test_a_confirmed_booking_is_stored_and_its_lead_queued(backends):
     assert backends.leads.client.outbox.status(key)[0] == PENDING
 
 
+async def test_the_booking_is_confirmed_aloud_by_code(backends):
+    # Bug (agent simulation, 2026-10-25): the caller said "Yes, that's right. Thanks, that's
+    # all, goodbye." Riley booked, then only said "Goodbye!": the caller never heard that the
+    # booking went through. Like the safety script, the line every booked caller must hear is
+    # said by the tool, and the model is told it's been said.
+    ctx = context(OpenSession(), **READY)
+    await offered_and_chosen(ctx)
+    new_turn(ctx)
+    out = await tools.book_appointment(ctx)
+    assert ctx.session.said[-1] == "You're all set for tomorrow, 8-10 am."
+    assert out["say"].startswith("They've just heard they're booked")
+
+
+async def test_no_confirmation_is_said_when_the_booking_is_refused(backends):
+    ctx = context(OpenSession(), **READY)
+    await offered_and_chosen(ctx)
+    await tools.book_appointment(ctx)  # same turn as the read-back: refused
+    assert not any(line.startswith("You're all set") for line in ctx.session.said)
+
+
 async def test_a_window_taken_meanwhile_is_reoffered(backends):
     ctx = context(OpenSession(), **READY)
     await offered_and_chosen(ctx)

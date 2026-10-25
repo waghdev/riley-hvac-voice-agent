@@ -44,6 +44,18 @@ async def test_split_across_chunks(reply="Thanks. What's the ZIP code?"):
     )
 
 
+async def test_a_chunk_ending_on_the_name_waits_for_the_rest():
+    # Bug (first agent simulation, 2026-10-25): with a chunk ending "Okay, Alex", "Okay," was
+    # taken as the whole acknowledgement, and "Alex. What's the best callback number?" went
+    # out. The name still belongs to the acknowledgement once its "." arrives.
+    chunks = ["Okay, Alex", ". What's the best ", "callback number?"]
+    assert await run(guard_for(True), chunks) == "What's the best callback number?"
+
+
+async def test_a_one_word_reply_after_an_acknowledgement_still_comes_out():
+    assert await run(guard_for(True), ["Okay, ", "great"]) == "Great"
+
+
 @pytest.mark.parametrize("line", ACKNOWLEDGEMENTS)
 async def test_the_acknowledgement_itself_is_never_touched(line):
     assert await run(guard_for(True), [line]) == line

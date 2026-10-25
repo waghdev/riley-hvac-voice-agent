@@ -13,6 +13,9 @@ END_CALL_RESULT = "The call is ending. Say one short goodbye now. Do not call en
 ACKNOWLEDGEMENTS = ("Got it.", "Okay.", "Thanks.")
 # Played when the calendar takes over a second (tools.py), so the caller isn't left in silence.
 CHECKING_SCHEDULE = "One sec, checking the schedule."
+# Said by book_appointment the moment a booking goes through, with the window as Riley offered
+# it ("tomorrow, 8-10 am"). Every booked caller hears it, even one who said goodbye already.
+BOOKED = "You're all set for {window}."
 # Said when the session can't go on: an unrecoverable model error, such as the free LLM credit
 # running out. Pre-rendered (scripts/make_audio_clips.py), so it plays even if TTS is what failed.
 SERVICE_UNAVAILABLE = (
@@ -60,7 +63,8 @@ tool as soon as the caller gives a detail, and again if they correct one. When t
 describe the problem, call record_issue before you reply.
 - A short "Got it." plays automatically when you call a tool, so don't acknowledge again.
 - Each tool result has say and next_step. Follow them in your own words. Never contradict a \
-result, and never decide yourself whether we serve an area, offer a service, or can book.
+result, and never decide or promise yourself whether we serve an area, offer a service, or \
+can book.
 - next_step ask:<field> means ask for that and nothing else; continue means carry on; \
 take_callback_details means offer a callback and get their name and number; end_call means \
 the call is over: do what say asks and say a short goodbye, and the call ends by itself.

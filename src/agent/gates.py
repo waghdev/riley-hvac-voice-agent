@@ -345,7 +345,10 @@ def booking_gate(state: CallState, cfg: BusinessConfig) -> GateResult:
             reason=f"read_back:{window}",
             say=(
                 f"Read back their callback number, {number[:3]}-{number[3:6]}-{number[6:]}, and "
-                f"the window, {state.offered_windows[window]}, and ask if that's all right."
+                f"the window, {state.offered_windows[window]}, and ask if that's all right. "
+                # The model said "I've scheduled that" here, before the yes (behavior runs,
+                # 2026-10-25); nothing is booked yet, and the gate won't book without the yes.
+                "It isn't booked until they say yes."
             ),
             next_step="confirm_booking",
         )
@@ -373,7 +376,11 @@ def booked(state: CallState) -> GateResult:
     return GateResult(
         Decision.BOOKED,
         reason=f"booked:{state.held_window}",
-        say=f"Tell them they're booked for {window}, then ask if there's anything else.",
+        # tools.py has just said the confirmation (prompts.BOOKED), so the reply moves on.
+        say=(
+            f"They've just heard they're booked for {window}. Ask if there's anything else, or "
+            "say goodbye if they already did."
+        ),
         next_step="continue",
     )
 

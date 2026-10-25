@@ -117,6 +117,30 @@ async def test_first_reply_records_the_issue_and_asks_one_short_question(session
     assert reply.count("?") <= 1, reply
 
 
+async def test_no_promise_of_service_before_the_zip_is_checked(session, judge):
+    # Bug (first agent simulation, 2026-10-25): asked whether we serve their area, Riley said
+    # "Sure, we can help with that." before hearing the ZIP, which was out of area. Whether we
+    # serve someone is the gates' decision (CLAUDE.md section 6), so Riley can't promise it.
+    result = await session.run(
+        user_input="I'm calling about a heat pump that's making a grinding noise. "
+        "Can you tell me if you service my area?"
+    )
+    assert calls(result, "record_issue"), describe(result.events)
+    await (
+        result.expect[-1]
+        .is_message(role="assistant")
+        .judge(
+            judge,
+            intent=(
+                "Doesn't say or imply that the company can help, serves the caller's area, or will "
+                "send someone; it hasn't checked the ZIP code yet. Asking for a detail (name, "
+                "number or ZIP) or saying it will check is a pass. Saying 'we can help with that' "
+                "or 'yes, we service your area' is a fail."
+            ),
+        )
+    )
+
+
 @pytest.mark.parametrize(
     "line",
     [
@@ -288,7 +312,17 @@ async def test_booking_reads_back_then_books_on_a_yes(session, judge):
     confirmed = await session.run(user_input="yep, that's right")
     assert calls(confirmed, "book_appointment"), describe(confirmed.events)
     assert session.userdata.outcome is Outcome.BOOKED
+    assert "You're all set for today, 12-2 pm." in messages(confirmed)
     assert not calls(confirmed, "end_call")  # booked, but Riley still asks if there's more
+
+
+async def test_a_yes_and_a_goodbye_in_one_breath_still_hears_the_booking(session):
+    # Bug (agent simulation, 2026-10-25): "Yes, that's right. Thanks, that's all, goodbye." got
+    # a booking and only "Goodbye!": the caller never heard that it went through.
+    await run_turns(session, [*INTAKE, "the twelve to two one works"])
+    confirmed = await session.run(user_input="yes, that's right. thanks, that's all, goodbye")
+    assert session.userdata.outcome is Outcome.BOOKED, describe(confirmed.events)
+    assert "You're all set for today, 12-2 pm." in messages(confirmed), describe(confirmed.events)
 
 
 async def test_caller_changes_the_slot_before_confirming(session):

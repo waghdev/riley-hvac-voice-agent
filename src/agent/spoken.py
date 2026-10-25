@@ -180,8 +180,9 @@ class NameGuard:
     Bug (debugger and cloud calls): "Thanks, Jordan." turn after turn; a prompt rule held only
     about half the time. Vocative uses after the first ("Thanks, Jordan." / "Jordan, what's...")
     are dropped before TTS. Mentions inside a sentence ("I have your name as Jordan") are read-
-    backs and stay. One instance per call; `get_name` returns the recorded first name, or None.
-    Only what the caller hears changes; the transcript keeps the model's words.
+    backs and stay. One instance per stream per call (TTS and the transcript each get one, see
+    main.py); `get_name` returns the recorded first name, or None. The chat history keeps the
+    model's words.
     """
 
     def __init__(self, get_name: Callable[[], str | None]) -> None:
@@ -262,6 +263,7 @@ _LEADING_ACK = re.compile(rf"^\s*{_ACK_WORDS}(?:\s+so\s+much)?(?:,\s*[A-Za-z]+)?
 _PARTIAL_ACK = re.compile(rf"^\s*{_ACK_WORDS}(?:\s+so(?:\s+much)?)?(?:,\s*[A-Za-z]*)?$", re.I)
 _ACK_PHRASES = ("thanks", "thank you", "got it", "okay", "ok", "alright", "all right", "great",
                 "perfect", "sounds good", "understood")  # fmt: skip
+_LONE_WORD = re.compile(r"^[A-Za-z]+$")
 
 
 class LeadingAckGuard:
@@ -299,9 +301,13 @@ class LeadingAckGuard:
         m = _LEADING_ACK.match(head)
         if m and head[m.end() :].strip():
             # An acknowledgement followed by more of the reply.
+            rest = head[m.end() :]
+            if not final and _LONE_WORD.match(rest):
+                # "Okay, Alex" may still become "Okay, Alex." with the name inside the
+                # acknowledgement (first agent simulation, 2026-10-25).
+                return None
             if not self._acknowledged():
                 return head
-            rest = head[m.end() :]
             return rest[:1].upper() + rest[1:]
         if final:
             return head  # a bare line (Riley's own "Got it.") or something short: keep it
