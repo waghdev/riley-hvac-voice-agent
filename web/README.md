@@ -1,7 +1,7 @@
 # web: the "Talk to Riley" page
 
 A browser page where anyone can call Riley, the voice agent in `src/agent`, without a phone.
-Next.js on Vercel's free Hobby plan.
+Next.js on Vercel's free Hobby plan: https://riley-kestrel-comfort.vercel.app
 
 - `app/api/token/route.ts`: issues a LiveKit token for one call, server-side only. Before it
   does, `lib/gatekeeper.ts` checks, in order: a Cloudflare Turnstile bot check, how many calls are

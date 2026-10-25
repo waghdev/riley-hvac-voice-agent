@@ -19,3 +19,5 @@ dist/
 *.egg-info/
 voice-samples/
 livekit.toml
+.vercel
+
