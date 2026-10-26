@@ -2,6 +2,83 @@
 
 One entry per decision: date, decision, alternatives considered, reason. Newest at the top.
 
+## 2026-10-25: M5 evals: LiveKit Agent Simulations, graded on final state (Dev approved)
+
+- **Runner:** LiveKit Agent Simulations, not a home-grown runner. LiveKit's simulator plays the
+  caller from a YAML script and an LLM judges the transcript, on the Build plan's free
+  allowance (350 text and 60 audio turns a month; a turn is one caller message, so the core
+  suite is about 50). A home-grown runner would have spent the $2.50 LLM credit on the
+  simulated caller and the judge, and couldn't measure audio.
+- **Sets:** `tests/scenarios/core.yaml` (the nine flows in CLAUDE.md section 9 plus a number
+  corrected at the read-back, each with an expected final state), `guardrails.yaml` (price
+  pressure, prompt injection) and `audio.yaml` (pauses, barge-in, backchannels; audio mode,
+  deployed agent). Point-form personas (PERSONA / OPENING LINE / FACTS / DO, IN ORDER) keep
+  the simulated caller on script.
+- **Final-state grading:** the judge only reads the transcript, so `main.check_final_state`
+  (`on_simulation_end`) compares the call's `CallState` with the scenario's
+  `userdata.expected` (`scenarios.final_state_failure`: outcome, window, number, priority,
+  category, callback reason; any booking on a call that didn't end booked) and fails the run
+  on a difference. Confirmed both ways with a scenario that expected the wrong outcome.
+- **Deterministic world:** under a simulation (`ctx.simulation_context()`), each call gets a
+  fresh calendar with only the weekly pattern and a clock pinned to Wednesday 2026-10-21
+  9:30 Phoenix, so windows are the same every run; no CRM. Keyed by job id, not set
+  process-wide, because on Windows livekit-agents runs jobs as threads of one process.
+  Real calls never take that branch.
+- **SDK limits found (1.8.8), worked around in simulation only:**
+  - The simulator collects `on_simulation_end`'s verdict over a link that closes with the
+    session, so when Riley hung up, a wrong final state never reached it. In a simulation,
+    a hang-up checks the final state first: right, it hangs up as in production (the judge
+    sees the real ending); wrong, the line stays open and Riley stops answering, so the
+    simulator ends the call and the check fails the run. Leaving the line open every time
+    made the judge fail right endings (the caller kept talking to a silent Riley).
+  - `session.start` connects the room in parallel with the greeting. With no audio to wait
+    for, a text simulation's greeting could reach the room first ("cannot access local
+    participant before connecting"), so simulations connect first.
+  - Several local text simulations at once on Windows stalled (thread executor, TLS setup
+    blocking the loop) and one hit an FFI panic. Local runs use `--concurrency 1`.
+- **QA grader (`qa/grade_call.py`, `qa/rubric.yaml`):** reads an exported run. Deterministic
+  checks first (greeting and disclosure, booking only after an answered read-back, nothing
+  booked after a closing gate, the exact safety script after a hazard, no price but $89 and
+  the free estimate, turn length and style), then a Gemini free-tier rubric (accuracy,
+  clarity, empathy, efficiency; critical / major / minor). Free tier because grading is
+  offline, so its 10 to 50 s replies don't matter, and every caller is fictional (rule 3).
+  - The model reasons through the call before it scores: with scores first, every model tried
+    gave 5/5/5/5 to everything. On a deliberately bad call `gemini-3.5-flash-lite` found the
+    ignored infant in 95-degree heat (critical) and the re-asked name (major).
+  - It is lenient on borderline calls (it passed "Got it. Goodbye!" after a booking, which
+    LiveKit's judge flagged), so the checks and LiveKit's judge carry the hard failures.
+- **Fixes found by simulations, each pinned by a test first:** booking confirmation said by
+  code ("You're all set for..."), after a caller confirmed and said goodbye in one breath and
+  heard only "Goodbye!"; no promising service before the gates; the read-back says it isn't
+  booked yet; fees can't be waived; the transcript (web page and simulations) gets the same
+  acknowledgement and name guards as TTS; the acknowledgement guard waits for a name.
+- **Known and left:** Riley calls `end_call` after a gate's goodbye in most runs, though the
+  result says not to (renaming the step didn't help). Harmless: code hangs up once and no
+  second goodbye is cued. "I can help with that" before the ZIP check still slips through in
+  about 1 in 10 behavior runs (from 1 in 3).
+- **Audio run (deployed agent, us-east, 3 scenarios, 24 of 60 audio turns): 2 passed.**
+  - Caller-heard latency p50 1,579 ms, p95 2,578 ms (the simulator measures what the caller
+    hears). The agent's own records for the same 25 turns: total p50 1,409 / p90 2,565 ms;
+    end of utterance 457 / 1,004; STT 291; LLM first token 479; TTS 131. Web target is
+    900 / 1,400: not met, the same gap Dev accepted at M2 (1,231 / 2,635).
+  - Turn-taking: 1 end-of-turn misprediction, 0.3% overlapping speech, no false interruptions,
+    no unanswered turns. Entity recall 100% both ways.
+  - The failure was the worst bug M5 found: a number given in paused groups was cut at the
+    first pause, Riley talked over the rest, and the model recorded 602-501-4200 from eight
+    digits, read it back and booked it (the final-state check failed the run). Fixed in code:
+    a number must be made of digits the caller said (`parsing.digits_heard`), and Riley waits
+    for the rest of a partial number (`turns.DigitHold`). Also fixed: the booking
+    confirmation said twice (`RepeatedConfirmationGuard`). Unit-tested, not yet re-run in
+    audio.
+- **LiveKit Inference credit exhausted (2026-10-26).** The gateway refuses with
+  `inference_quota_exceeded` until the next billing cycle; Build caps are hard, so nothing was
+  billed. M5's testing used it up: about 25 full or partial behavior-suite runs plus
+  repeated single tests (measuring flaky behavior), 164 text-simulation turns (Riley's own
+  LLM calls are billed even though the simulator's are not) and the audio run. Riley's live
+  LLM is on the same credit, so the deployed demo can't hold a conversation until it resets:
+  callers hear the greeting, then the pre-rendered "trouble on my end" line and a hang-up.
+  Dev decides what's next (rule 2).
+
 ## 2026-10-25: Page redesign (Dev's request), and only the Call button asks for a token
 
 - **Bug (Dev's first visit to the live page):** "We couldn't confirm you're human" showed before

@@ -4,8 +4,12 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
 
 ## Current state
 
-- **Milestone:** M4 Web call page deployed (2026-10-25): https://riley-kestrel-comfort.vercel.app.
-  Closes after Dev's browser calls (desktop and phone).
+- **Milestone:** M5 Evals in progress, **stopped: the LiveKit Inference LLM credit ran out
+  (2026-10-26)**. Riley's LLM uses it, so the live demo can't converse and no LLM testing can
+  run until the next billing cycle or Dev chooses another route (see Open questions). Nothing
+  was billed (Build caps are hard). M4 (deployed 2026-10-25,
+  https://riley-kestrel-comfort.vercel.app) still closes after Dev's browser calls, which need
+  a working LLM.
 - **Location:** `C:\Users\Devendra\Projects\Riley - HVAC`. Repo: https://github.com/waghdev/voice-agent-reference
   (private until M7). LiveKit project: `riley-kestrel-comfort-heating-a` (Build).
 - **Stack as built:** Deepgram `nova-3` STT + Aura-2 TTS (Dev's key), LLM
@@ -13,9 +17,11 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
   bundled Silero VAD, ai-coustics `QUAIL_L`.
 - **Deployed:** `riley` runs on LiveKit Cloud in `us-east` (Build plan), so latency can be measured
   the way visitors will get it. Office ambience and keyboard typing are on.
-- **Next step:** Dev calls Riley from https://riley-kestrel-comfort.vercel.app on a laptop and a
-  phone (book an appointment once). Then Claude reads the Vercel and agent logs (call admitted,
-  counters, greeting timing) and closes M4.
+- **Next step:** Dev decides the LLM route while the credit is out (Open questions). Then:
+  re-run the behavior suite, guardrails and the audio set to verify commit `ba90fd7`, deploy
+  it, Dev's browser calls (closes M4), and the M5 latency gap goes to Dev (rule 8).
+- **Deployed version:** commit `a08462c` (before the audio-run fixes in `ba90fd7`, which are
+  unit-tested but not deployed).
 - **Web page:** `web/` (Next.js), Vercel project `riley-kestrel-comfort` (scope
   `devs-projects-1e3f5727`), deploys on push when `web/` changes. The Vercel plugin can't see this
   project (404), so use the CLI (`npx vercel ... --scope devs-projects-1e3f5727`). Local: `cd web && pnpm dev` with `web/.env.local` (LiveKit values only; Turnstile and
@@ -71,8 +77,8 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
 - [x] M2 Decision layer (2026-10-22; 244 unit + 11 behavior tests; latency gap accepted by Dev)
 - [x] M3 Booking and CRM (2026-10-25; 353 unit + 20 behavior tests; Dev's booking call "sounds
       right")
-- [ ] M4 Web call page (in progress)
-- [ ] M5 Evals and quality
+- [ ] M4 Web call page (deployed; closes after Dev's browser calls)
+- [ ] M5 Evals and quality (built; verification stopped by the LLM credit)
 - [ ] M6 Phone
 - [ ] M7 Ship
 
@@ -83,12 +89,13 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
 | Web response latency p50 / p90 | ≤ 900 / 1,400 ms | **1,231 / 2,635 ms** with the M2 decision layer (6 calls, 17 turns). Later turns p50 1,119 ms (the spoken "Got it." keeps tool turns at 0.8–1.2 s); first turns p50 2,572 ms (4 of 6 hit the 2.5 s `max_delay`; being diagnosed). M1: 1,260 / 2,564. Not met yet | 2026-10-22 |
 | Phone response latency p50 / p90 | ≤ 1,200 / 1,800 ms | | |
 | Greeting start after connect | ≤ 1,000 ms web | 1,361 ms (live TTS) and 1,920 ms (pre-rendered clip), from session start. Joining the room and linking the caller took 1.3 s of the second; TTS was never the bottleneck. Measure "caller connects → first audio" from the web page in M4. Not met | 2026-10-21 |
-| Barge-in stop time | ≤ 300 ms | | |
-| Backchannels ignored | yes | | |
+| Web latency, caller-heard (audio simulation, deployed) | ≤ 900 / 1,400 ms | **p50 1,579 / p95 2,578 ms** heard by the simulated caller; agent's own p50 1,409 / p90 2,565 ms (25 turns: end of utterance 457, STT 291, LLM 479, TTS 131). Not met | 2026-10-25 |
+| Barge-in stop time | ≤ 300 ms | Barge-in during the read-back handled (correct number booked); no false interruptions in the audio run. Yield time not reported per turn yet | 2026-10-25 |
+| Backchannels ignored | yes | "Mm-hmm" mid-turn didn't interrupt; a "Mhmm" after a question was taken as an answer (Riley began "I'm sorry, I..."). Judge passed | 2026-10-25 |
 | Numbers, ZIPs, times spoken correctly | yes | Code step before TTS (`spoken.py`, 35 unit tests); Dev's cloud calls didn't flag any | 2026-10-22 |
 | Silence handling and clean end-call | yes | Gate-ended calls hang up in code; no second goodbye; clean process exit in cloud; behavior tests green | 2026-10-22 |
-| Scenario suite pass rate | 100% | | |
-| QA grader: critical findings | 0 | | |
+| Scenario suite pass rate | 100% | Core (text, 9): 9/9 twice. Guardrails (2): 1/2, the failure fixed (fee waiver), re-run pending. Audio (3): 2/3, the failure fixed in code, re-run pending | 2026-10-25 |
+| QA grader: critical findings | 0 | 0 critical, 0 major, 6 minor (turns of 26-33 words) on the 9/9 core run | 2026-10-25 |
 | Dev's listening check vs Retell standard | pass | Dev, after 7 M2 cloud calls: "I don't feel any latency... the agent responds quickly" (on headphones). Accepted the measured gap (1,231 / 2,635 ms p50/p90) | 2026-10-22 |
 
 ## Quota and cost log
@@ -98,6 +105,8 @@ Gemini rate-limit hits). Target: $0.
 
 | Date | Observation |
 | --- | --- |
+| 2026-10-26 | **LiveKit Inference LLM credit exhausted** (`inference_quota_exceeded`, "wait for the next billing cycle or upgrade"). Nothing billed. Used by M5: ~25 behavior-suite runs and repeated single tests, 164 text-simulation turns (Riley's own LLM calls bill the credit), the audio run, debugger turns. The live demo's LLM is on the same credit. Gemini free tier (grader): ~40 grading calls, no limit hit. |
+| 2026-10-25 | Agent Simulations this month: **164 of 350 text turns, 24 of 60 audio turns.** The audio run also used Deepgram STT/TTS and ~6 agent session minutes. Simulation turns are free through Oct 31 on paid plans; Build has the hard allowance. |
 | 2026-10-22 | **M3 testing on LiveKit Inference:** about 12 behavior-suite runs (full or partial) and ~40 text-mode debugger turns. Estimate ~$0.20 of the $2.50 monthly credit (one full suite run is ~$0.01–0.02 with the judge). No audio-mode turns. |
 | 2026-10-20 | LiveKit Build allowances are hard caps: requests fail at the limit, with no overage billing ([quotas page](https://docs.livekit.io/deploy/admin/quotas-and-limits.md)). |
 | 2026-10-20 | Build: 1,000 agent session min/month, 5 concurrent sessions, $2.50/month Inference credit, 1 US local number + 50 inbound min, 350 text / 60 audio simulation turns. Shared across all of Dev's free projects. |
@@ -116,6 +125,16 @@ Gemini rate-limit hits). Target: $0.
 | 2026-10-20 | Noise cancellation: ai-coustics `QUAIL_VF_S`/`QUAIL_VF_L` and Krisp VIVA cost extra. Krisp NC and ai-coustics `QUAIL_L` have no extra charge. LiveKit's own starter uses `QUAIL_VF_S`, so copying it would break rule 2. Build availability is not stated on the docs page; check the pricing page at M1. |
 
 ## Open questions
+
+- **LLM while the LiveKit Inference credit is out (Dev decides, rules 2 and 8).** Options:
+  wait for the billing-cycle reset (date on the LiveKit dashboard's billing page); a provider
+  with its own free tier and Dev's key (sign-up needed; tool calling must re-pass the behavior
+  suite); or a paid plan (only with Dev's explicit yes). The Gemini free tier measured 11-28 s
+  to first token at M0, too slow for live calls. Separately: pause the public page meanwhile
+  (daily cap 0, so visitors see "busy" instead of a broken call)?
+- **Testing budget once the LLM is back:** the $2.50 credit can't carry M5-style testing and
+  visitors. Keep behavior runs to the full suite once per change (no repeated single tests),
+  text simulations before deploys only.
 
 - **M1 choices approved by Dev (2026-10-20):** `inference.TurnDetector()`, a no-extra-charge noise
   cancellation model (`QUAIL_L` or Krisp NC), Gemini's default temperature of 1, fastest free Flash
@@ -139,6 +158,23 @@ Gemini rate-limit hits). Target: $0.
   scaileai.com; check Vercel Hobby terms first).
 
 ## Session log
+
+### 2026-10-25/26: M5 evals built; stopped when the LLM credit ran out
+
+- Dev approved the M5 design: LiveKit Agent Simulations graded on final state, one audio run
+  on the deployed agent, a QA grader on the Gemini free tier, a web latency report.
+- Built: `tests/scenarios/` (core 9, guardrails 2, audio 3), simulation hooks in `main.py`
+  (pinned clock, per-call calendar, final-state check, SDK workarounds; decisions.md),
+  `qa/grade_call.py` + `qa/rubric.yaml`. 443 unit tests; behavior suite 24 tests.
+- Results: core 9/9 (twice), guardrails 1/2, audio 2/3; QA grader 0 critical on core.
+  Audio latency heard p50 1,579 / p95 2,578 ms: target not met, for Dev (rule 8).
+- Bugs found by simulations, each with a test first: number with paused groups cut off and
+  recorded with invented digits, then booked (critical); booking confirmation never heard when
+  the caller said goodbye early; confirmation then said twice; "we can help with that" before
+  the ZIP; "I've scheduled that" before the yes; fee waiver request ignored; transcript showing
+  duplicate acknowledgements; acknowledgement guard deciding too early on "Okay, Alex".
+- Deployed `a08462c` to us-east. The last fixes (`ba90fd7`) await the credit for their
+  behavior and audio re-runs.
 
 ### 2026-10-25: page redesign and a token-fetch fix
 
