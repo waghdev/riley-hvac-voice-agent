@@ -2,7 +2,13 @@
 
 import pytest
 
-from agent.parsing import digits_from_speech, normalize_phone, normalize_zip, said_by_caller
+from agent.parsing import (
+    digits_from_speech,
+    digits_heard,
+    normalize_phone,
+    normalize_zip,
+    said_by_caller,
+)
 
 
 @pytest.mark.parametrize(
@@ -80,3 +86,30 @@ def test_normalize_phone(said, number):
 )
 def test_said_by_caller_checks_the_quote_against_the_transcript(quote, turns, said):
     assert said_by_caller(quote, turns) is said
+
+
+# Audio simulation, 2026-10-25: the caller's number came in three pieces ("Six zero two." /
+# "Five." / "O. One four two.") and the model recorded 602-501-4200, filling in digits nobody
+# said. A recorded number must be made of digits the caller said, in order.
+SPLIT_NUMBER = ["Hi. My AC is making this clicking noise.", "Dana.", "Six zero two.", "Five.",
+                "O. One four two."]  # fmt: skip
+# A correction: the model joins the old start to the new ending.
+CORRECTED = ["six oh two five five five oh one four eight", "no, it ends oh one eight four"]
+
+
+@pytest.mark.parametrize(
+    ("digits", "turns", "heard"),
+    [
+        ("6025014200", SPLIT_NUMBER, False),  # invented: only eight digits were said
+        ("6025550142", ["six oh two, five five five, oh one four two"], True),
+        ("6025550142", ["602-555-0142"], True),
+        ("6025550142", ["six oh two", "five five five", "oh one four two"], True),  # in pieces
+        ("6025550142", ["six oh two double five five oh one four two"], True),
+        ("6025550184", CORRECTED, True),
+        ("6025550142", ["oh one four two", "six oh two five five five"], False),  # out of order
+        ("85016", ["eight five oh one six"], True),
+        ("85016", ["eight five oh one"], False),
+    ],
+)
+def test_digits_heard_needs_every_digit_from_the_caller_in_order(digits, turns, heard):
+    assert digits_heard(digits, turns) is heard

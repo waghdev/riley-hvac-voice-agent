@@ -21,6 +21,8 @@ _TENS = {
     "ninety": 9,
 }  # fmt: skip
 _REPEATS = {"double": 2, "triple": 3}
+# Every word digits_from_speech reads as (part of) a number.
+NUMBER_WORDS = frozenset(_UNITS) | frozenset(_TEENS) | frozenset(_TENS) | frozenset(_REPEATS)
 
 
 def digits_from_speech(text: str) -> str:
@@ -81,6 +83,18 @@ def normalize_phone(text: str) -> str | None:
     if digits[0] in "01" or digits[3] in "01":
         return None
     return digits
+
+
+def digits_heard(digits: str, caller_turns: Iterable[str]) -> bool:
+    """Whether the caller said these digits, in this order, gaps allowed.
+
+    The same rule as said_by_caller, for numbers: asked for ten digits, the model filled in the
+    ones it missed (audio simulation, 2026-10-25: "Six zero two." / "Five." / "O. One four two."
+    recorded as 602-501-4200). Gaps are allowed so a number given in pieces, or corrected ("it
+    ends oh one eight four"), still counts; a digit nobody said can't be matched.
+    """
+    heard = iter("".join(digits_from_speech(turn) for turn in caller_turns))
+    return all(d in heard for d in digits)  # `in` advances the iterator: a subsequence test
 
 
 def _words(text: str) -> str:

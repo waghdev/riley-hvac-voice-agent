@@ -239,6 +239,8 @@ async def test_the_booking_is_confirmed_aloud_by_code(backends):
     out = await tools.book_appointment(ctx)
     assert ctx.session.said[-1] == "You're all set for tomorrow, 8-10 am."
     assert out["say"].startswith("They've just heard they're booked")
+    # So the reply's own "You're all set..." is dropped this turn (RepeatedConfirmationGuard).
+    assert ctx.userdata.confirmed_aloud
 
 
 async def test_no_confirmation_is_said_when_the_booking_is_refused(backends):

@@ -438,6 +438,7 @@ async def record_caller_details(
         intake.record_caller_details,
         first_name=first_name,
         callback_number=callback_number,
+        caller_said=_caller_said(context),  # a number must be digits the caller said
     )
 
 
@@ -450,7 +451,12 @@ async def record_service_location(
     Args:
         zip_code: The ZIP code exactly as you heard it, digits or words.
     """
-    return await _run(context, intake.record_service_location, zip_code=zip_code)
+    return await _run(
+        context,
+        intake.record_service_location,
+        zip_code=zip_code,
+        caller_said=_caller_said(context),
+    )
 
 
 @function_tool
@@ -489,6 +495,7 @@ async def request_callback(
         reason=reason,
         first_name=first_name,
         callback_number=callback_number,
+        caller_said=_caller_said(context),
     )
 
 
@@ -580,7 +587,9 @@ async def book_appointment(context: RunContext[CallState]) -> dict[str, Any] | N
         # a caller who confirmed and said goodbye in one breath got only "Goodbye!" (agent
         # simulation, 2026-10-25).
         window = state.offered_windows.get(state.held_window or "", "")
-        _say(context, prompts.BOOKED.format(window=window), "booking confirmation")
+        state.confirmed_aloud = _say(
+            context, prompts.BOOKED.format(window=window), "booking confirmation"
+        )
     return out
 
 

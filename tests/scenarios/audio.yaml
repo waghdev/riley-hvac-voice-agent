@@ -1,0 +1,105 @@
+# Speech-only behavior: run in audio mode against the deployed agent, so turn-taking, barge-in
+# and latency are what callers get (CLAUDE.md section 4).
+#
+#   lk agent simulate audio --scenarios tests/scenarios/audio.yaml --agent-name riley \
+#     --concurrency 1
+#
+# About 20 of the 60 free audio-simulation turns a month on LiveKit Build, plus Deepgram STT/TTS
+# credit and agent session minutes, so run it for changes to speech, turn-taking or interruption,
+# not on every commit. The deployed agent must include the simulation hooks (main.py): same
+# pinned clock and fresh calendar as core.yaml, so standard callers are offered tomorrow 10-12
+# and 12-2. Callers are fictional; numbers are 555-01xx.
+id: SCNG_5ncrHFBGzRs4
+name: Riley speech and turn-taking
+scenarios:
+  - id: SCN_Rfx5K5Hx7xzM
+    label: Caller pauses mid-sentence and gives digits in groups
+    instructions: |
+      PERSONA: Dana Whitfield, relaxed, thinks out loud and pauses mid-sentence.
+      OPENING LINE: "Hi, my AC is... um... making this clicking noise, kind of on and off."
+      FACTS (reveal each only when asked, one per turn):
+      - first name: Dana
+      - callback number: say it in groups with a short pause between them: "six oh two...
+        five five five... oh one four two"
+      - ZIP code: say it digit by digit: "eight five oh one six"
+      - the AC still cools; nobody at home is elderly, a baby, or has a medical condition
+      DO, IN ORDER:
+      1. Answer each question, pausing the way the facts say.
+      2. When offered appointment windows, take the earlier one.
+      3. When Riley reads back your number and the window, check the number is 602-555-0142
+         and say that's right.
+      4. Once Riley says you're booked, say no, that's all, thanks, bye.
+    agent_expectations: >
+      Lets Dana finish each answer without cutting in during her pauses, gets the callback
+      number 602-555-0142 and ZIP 85016 right, reads the number back correctly, and books the
+      earlier window after her yes. Cutting her off mid-number, booking a wrong number, or
+      ending without a booking is a fail.
+    tags:
+      feature: turn_taking
+    userdata:
+      expected:
+        outcome: booked
+        window: "2026-10-22T10:00"
+        callback_number: "6025550142"
+
+  - id: SCN_qjguWdHjfLSF
+    label: Caller interrupts the read-back to correct the number
+    instructions: |
+      PERSONA: Tom Brennan, hurried; he interrupts when he hears something wrong.
+      OPENING LINE: "Yeah hi, my AC's making a buzzing noise. It still cools, but it's loud."
+      FACTS (reveal each only when asked, one per turn):
+      - first name: Tom
+      - ZIP code: 85014
+      - nobody at home is elderly, a baby, or has a medical condition
+      GROUND TRUTH (never volunteer): your real number is 602-555-0184.
+      DO, IN ORDER:
+      1. When asked for your number, say "six oh two, five five five, oh one four eight".
+      2. When offered appointment windows, take the earlier one.
+      3. As soon as Riley starts reading your number back, interrupt her mid-sentence: "No, no,
+         sorry, it ends oh one eight four."
+      4. When Riley reads back 602-555-0184 and the window, say yes, that's right.
+      5. Once Riley says you're booked, say thanks, bye.
+    agent_expectations: >
+      Stops talking promptly when Tom interrupts, takes the corrected number, reads back
+      602-555-0184 and the window, and books after his yes. Talking over him, booking with
+      602-555-0148, or booking without reading back the corrected number is a fail.
+    tags:
+      feature: barge_in
+    userdata:
+      expected:
+        outcome: booked
+        callback_number: "6025550184"
+
+  - id: SCN_fRzRaWoG8o7R
+    label: Caller says mm-hmm while Riley talks
+    instructions: |
+      PERSONA: Marcus Okafor, worried, a listener who makes small sounds of agreement. His
+      81-year-old mother lives with him.
+      OPENING LINE: "Hi, our AC stopped cooling, it's blowing warm air, and my 81-year-old mom
+      is here with me."
+      FACTS (reveal each only when asked, one per turn):
+      - first name: Marcus
+      - callback number: 480-555-0117
+      - ZIP code: 85008
+      DO, IN ORDER:
+      1. Answer each question.
+      2. While Riley is offering appointment windows, say "mm-hmm" once in the middle, without
+         stopping her, then let her finish.
+      3. Take the earlier window.
+      4. While Riley reads back your number and the window, say "okay" once in the middle, then
+         let her finish and say yes, that's right.
+      5. Once Riley says you're booked, say thank you, goodbye.
+    agent_expectations: >
+      Treats Marcus's "mm-hmm" and "okay" as listening, not as interruptions: Riley keeps going
+      or picks up where she was, without starting over or asking what he said. Offers a window
+      today because the AC is out with an 81-year-old at home, and books the window he picks
+      after the read-back. Stopping and restarting on a backchannel, or ending without a
+      booking, is a fail.
+    tags:
+      feature: backchannel
+    userdata:
+      expected:
+        outcome: booked
+        priority: true
+        window: "2026-10-21T14:00"
+        callback_number: "4805550117"

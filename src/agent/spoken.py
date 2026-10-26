@@ -266,17 +266,9 @@ _ACK_PHRASES = ("thanks", "thank you", "got it", "okay", "ok", "alright", "all r
 _LONE_WORD = re.compile(r"^[A-Za-z]+$")
 
 
-class LeadingAckGuard:
-    """A tts_text_transforms entry: once Riley has said "Got it." this turn (tools.py plays it
-    while the LLM writes the reply), drop an acknowledgement the reply opens with.
-
-    Bug (debugger calls): "Thanks." then "Thanks. What's the ZIP code?" in 2 of 2 runs, despite
-    the prompt and a tool-result field. The spoken acknowledgement itself is a bare fixed line,
-    so it passes untouched. Only the start of each reply is examined.
-    """
-
-    def __init__(self, acknowledged: Callable[[], bool]) -> None:
-        self._acknowledged = acknowledged
+class _OpeningGuard:
+    """A text transform that decides what to do with the start of a reply, then passes the rest
+    through: it holds chunks until _decide can tell, and only the opening is ever changed."""
 
     def __call__(self, text: AsyncIterable[str]) -> AsyncIterator[str]:
         return self._run(text)
@@ -295,6 +287,23 @@ class LeadingAckGuard:
                     yield decided
         if head:
             yield self._decide(head, final=True) or ""
+
+    def _decide(self, head: str, *, final: bool) -> str | None:
+        """The text to send for this opening, or None if it's too early to tell."""
+        raise NotImplementedError
+
+
+class LeadingAckGuard(_OpeningGuard):
+    """A tts_text_transforms entry: once Riley has said "Got it." this turn (tools.py plays it
+    while the LLM writes the reply), drop an acknowledgement the reply opens with.
+
+    Bug (debugger calls): "Thanks." then "Thanks. What's the ZIP code?" in 2 of 2 runs, despite
+    the prompt and a tool-result field. The spoken acknowledgement itself is a bare fixed line,
+    so it passes untouched. Only the start of each reply is examined.
+    """
+
+    def __init__(self, acknowledged: Callable[[], bool]) -> None:
+        self._acknowledged = acknowledged
 
     def _decide(self, head: str, *, final: bool) -> str | None:
         """The text to send for this opening, or None if it's too early to tell."""
@@ -319,3 +328,41 @@ class LeadingAckGuard:
     def _is_word_prefix(head: str) -> bool:
         start = head.lstrip().lower()
         return bool(start) and any(p.startswith(start) for p in _ACK_PHRASES)
+
+
+# --- No second booking confirmation ---------------------------------------------------------
+
+_CONFIRMATION = re.compile(r"^\s*(?:you'?re|you are)\s+(?:all set|booked|scheduled)\b", re.I)
+_CONFIRMATION_PHRASES = ("you're all set", "you are all set", "youre all set", "you're booked",
+                         "you are booked", "you're scheduled", "you are scheduled")  # fmt: skip
+# The end of a sentence: punctuation, then a capital. So "10 a.m. to noon" isn't one.
+_SENTENCE_END = re.compile(r"[.!?](?=\s+[A-Z])")
+_LAST_SENTENCE_END = re.compile(r"[.!?]\s*$")
+
+
+class RepeatedConfirmationGuard(_OpeningGuard):
+    """A text transform: once tools.py has said "You're all set for <window>." this turn, drop
+    a first sentence that says it again.
+
+    Bug (audio simulation, 2026-10-25): code's confirmation, then the model's "You're all set for
+    tomorrow between 10 am and 12 pm. Is there anything else?", although the tool result said
+    the caller had just heard it.
+    """
+
+    def __init__(self, said: Callable[[], bool]) -> None:
+        self._said = said
+
+    def _decide(self, head: str, *, final: bool) -> str | None:
+        if not self._said():
+            return head
+        if _CONFIRMATION.match(head):
+            end = _SENTENCE_END.search(head) or (_LAST_SENTENCE_END.search(head) if final else None)
+            if end is not None:
+                return head[end.end() :].lstrip()
+            return "" if final else None  # the whole reply is the repeat, or it isn't over yet
+        if final:
+            return head
+        start = head.lstrip().lower()
+        if start and any(p.startswith(start) for p in _CONFIRMATION_PHRASES):
+            return None  # "You're all" could still become the repeat
+        return head

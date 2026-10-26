@@ -30,7 +30,7 @@ from agent.gates import (
     window_taken,
     windows_gate,
 )
-from agent.parsing import normalize_phone, normalize_zip, said_by_caller
+from agent.parsing import digits_heard, normalize_phone, normalize_zip, said_by_caller
 from agent.state import CallState, Outcome, ReadBack
 
 # NOT_BOOKABLE carries the reason it can't be booked; each maps to the call's outcome.
@@ -92,17 +92,26 @@ def _next(state: CallState, cfg: BusinessConfig) -> GateResult:
     return _settle(state, ready)
 
 
+def _heard(digits: str | None, caller_said: Sequence[str] | None) -> str | None:
+    """The digits, if the caller said them (parsing.digits_heard); None means "ask again".
+    caller_said None skips the check (tests of other logic); tools.py always passes it."""
+    if digits is None or caller_said is None or digits_heard(digits, caller_said):
+        return digits
+    return None
+
+
 def record_caller_details(
     state: CallState,
     cfg: BusinessConfig,
     first_name: str | None = None,
     callback_number: str | None = None,
+    caller_said: Sequence[str] | None = None,
 ) -> GateResult:
     first_name, callback_number = _given(first_name), _given(callback_number)
     if first_name is not None:
         state.first_name = first_name
     if callback_number is not None:
-        number = normalize_phone(callback_number)
+        number = _heard(normalize_phone(callback_number), caller_said)
         if number is None:
             return _miss(state, "callback_number", cfg)
         state.callback_number = number
@@ -110,8 +119,10 @@ def record_caller_details(
     return _next(state, cfg)
 
 
-def record_service_location(state: CallState, cfg: BusinessConfig, zip_code: str) -> GateResult:
-    zip5 = normalize_zip(zip_code)
+def record_service_location(
+    state: CallState, cfg: BusinessConfig, zip_code: str, caller_said: Sequence[str] | None = None
+) -> GateResult:
+    zip5 = _heard(normalize_zip(zip_code), caller_said)
     if zip5 is None:
         return _miss(state, "zip_code", cfg)
     state.zip_code = zip5
@@ -187,9 +198,12 @@ def request_callback(
     reason: str,
     first_name: str | None = None,
     callback_number: str | None = None,
+    caller_said: Sequence[str] | None = None,
 ) -> GateResult:
     state.callback_reason = reason if reason in cfg.callback_reasons else "other"
-    return record_caller_details(state, cfg, first_name=first_name, callback_number=callback_number)
+    return record_caller_details(
+        state, cfg, first_name=first_name, callback_number=callback_number, caller_said=caller_said
+    )
 
 
 # --- Booking. tools.py does the calendar I/O and passes in what it found; these decide. --------

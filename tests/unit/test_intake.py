@@ -47,6 +47,32 @@ def test_details_can_arrive_in_any_order(s):
     assert r.next_step == "ask:first_name"
 
 
+def test_a_number_the_caller_never_said_is_asked_for_again(s):
+    # Audio simulation, 2026-10-25: three pieces, eight digits, recorded as 602-501-4200 and
+    # booked. Now it's a miss: Riley asks again, and gives up after two (failed_attempt_gate).
+    said = ["Six zero two.", "Five.", "O. One four two."]
+    r = record_caller_details(s, CFG, callback_number="602-501-4200", caller_said=said)
+    assert (r.decision, r.next_step) == (Decision.ASK_AGAIN, "ask:callback_number")
+    assert s.callback_number is None
+    said.append("six oh two, five five five, oh one four two")
+    record_caller_details(s, CFG, callback_number="602-555-0142", caller_said=said)
+    assert s.callback_number == "6025550142"
+
+
+def test_a_zip_the_caller_never_said_is_asked_for_again(s):
+    r = record_service_location(s, CFG, zip_code="85016", caller_said=["eight five oh one"])
+    assert (r.decision, r.next_step) == (Decision.ASK_AGAIN, "ask:zip_code")
+    assert s.zip_code is None
+
+
+def test_a_callback_request_checks_the_number_too(s):
+    r = request_callback(
+        s, CFG, reason="billing", first_name="Jordan", callback_number="602-555-0100",
+        caller_said=["it's Jordan, six oh two five five five"],
+    )  # fmt: skip
+    assert r.next_step == "ask:callback_number" and s.callback_number is None
+
+
 def test_out_of_area_zip_ends_the_call_with_that_outcome(s):
     r = record_service_location(s, CFG, zip_code="85301")
     assert r.decision is Decision.OUT_OF_AREA

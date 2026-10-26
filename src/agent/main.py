@@ -50,8 +50,14 @@ from agent.clips import Clip, load_clip
 from agent.config import DEFAULT_TTS_VOICE, REPO_ROOT, load_business
 from agent.metrics import CLIENT_TIMING_TOPIC, JsonlWriter, TurnPairer, client_timing_record
 from agent.silence import SilenceMonitor
-from agent.spoken import LeadingAckGuard, NameGuard, speak_numbers_stream
+from agent.spoken import (
+    LeadingAckGuard,
+    NameGuard,
+    RepeatedConfirmationGuard,
+    speak_numbers_stream,
+)
 from agent.state import CallState, Outcome
+from agent.turns import DigitHold
 
 load_dotenv(REPO_ROOT / ".env")
 logger = logging.getLogger("riley")
@@ -119,6 +125,16 @@ async def clip_frames(clip: Clip, frame_ms: int = 20) -> AsyncIterator[rtc.Audio
         )
 
 
+def spoken_guards(state: CallState) -> list[Callable[[AsyncIterable[str]], AsyncIterable[str]]]:
+    """What code removes from a reply before anyone hears or reads it (spoken.py), for one
+    stream: TTS and the transcript each get their own, since NameGuard counts uses."""
+    return [
+        LeadingAckGuard(lambda: state.acknowledged),
+        RepeatedConfirmationGuard(lambda: state.confirmed_aloud),
+        NameGuard(lambda: state.first_name),
+    ]
+
+
 def close_on_fatal_error(
     end_with: Callable[..., Awaitable[None]],
 ) -> Callable[[ErrorEvent], None]:
@@ -152,8 +168,13 @@ TextTransform = Callable[[AsyncIterable[str]], AsyncIterable[str]]
 
 
 class Riley(Agent):
-    def __init__(self, transcript_transforms: Sequence[TextTransform] = ()) -> None:
+    def __init__(
+        self,
+        transcript_transforms: Sequence[TextTransform] = (),
+        digit_hold: DigitHold | None = None,
+    ) -> None:
         self._transcript_transforms = transcript_transforms
+        self._digit_hold = digit_hold
         super().__init__(
             instructions=prompts.build_instructions(BUSINESS),
             tools=[
@@ -196,6 +217,23 @@ class Riley(Agent):
         async for chunk in Agent.default.transcription_node(self, text, model_settings):
             yield chunk
 
+    async def on_user_turn_completed(
+        self, turn_ctx: llm.ChatContext, new_message: ChatMessage
+    ) -> None:
+        """Half a phone number or ZIP gets no reply yet (turns.DigitHold). The SDK drops a
+        turn that raises StopResponse from the history, so the held words are put in front of
+        the next turn's message instead: the model and digits_heard see the whole number."""
+        if self._digit_hold is None:
+            return
+        said = new_message.text_content or ""
+        hold, text = self._digit_hold.on_turn(said)
+        if text != said:
+            new_message.content = [text]
+        if hold:
+            # Speech only: typed text (debugger, text simulations) skips this hook entirely.
+            logger.info("waiting for the rest of a number")
+            raise StopResponse()
+
 
 class SimulatedRiley(Riley):
     """Riley in an agent simulation, where hanging up on a call that ended wrong leaves the
@@ -211,6 +249,7 @@ class SimulatedRiley(Riley):
     ) -> None:
         if self._hung_up():
             raise StopResponse()
+        await super().on_user_turn_completed(turn_ctx, new_message)
 
 
 async def check_final_state(sim: SimulationContext) -> None:
@@ -285,13 +324,13 @@ async def entrypoint(ctx: JobContext) -> None:
         userdata=state,
         # What TTS hears: LiveKit's markdown and emoji filters (the defaults, kept); no second
         # acknowledgement after tools.py's spoken "Got it." (first, so a dropped "Thanks,
-        # Jordan." doesn't use up the name); the caller's name at most once per call; then
-        # numbers spoken the way people say them. The transcript gets the first two too (Riley).
+        # Jordan." doesn't use up the name); no second "You're all set" after the booking
+        # line; the caller's name at most once per call; then numbers spoken the way people
+        # say them. The transcript gets all but the last (Riley).
         tts_text_transforms=[
             "filter_markdown",
             "filter_emoji",
-            LeadingAckGuard(lambda: state.acknowledged),
-            NameGuard(lambda: state.first_name),
+            *spoken_guards(state),
             speak_numbers_stream,
         ],
     )
@@ -324,11 +363,21 @@ async def entrypoint(ctx: JobContext) -> None:
         goodbye=prompts.SILENCE_GOODBYE,
     )
 
+    # --- Half a number: wait for the rest (turns.py) --------------------------------------
+    # If the caller has really stopped, the held words become a normal turn and get a reply.
+    digit_hold = DigitHold(
+        lambda: state.expecting, reply=lambda text: session.generate_reply(user_input=text)
+    )
+
     @session.on("user_state_changed")
     def _on_user_state(ev: UserStateChangedEvent) -> None:
         # Riley speaking doesn't clear "away"; only caller activity does, so the check-in
         # isn't cancelled by its own "Are you still there?".
         silence.on_user_state(ev.new_state)
+        if ev.new_state == "speaking":
+            digit_hold.on_caller_speaking()
+        elif ev.new_state == "listening":
+            digit_hold.on_caller_silent()
 
     @session.on("conversation_item_added")
     def _on_item(ev: ConversationItemAddedEvent) -> None:
@@ -344,6 +393,7 @@ async def entrypoint(ctx: JobContext) -> None:
             state.expecting = None
             session.update_options(endpointing_opts=tools.endpointing_for(state))
             state.acknowledged = False  # this new turn may get its own "Got it."
+            state.confirmed_aloud = False
         record = pairer.add(ev.item.role, ev.item.metrics or {})
         if record:
             writer.write(record)
@@ -420,8 +470,8 @@ async def entrypoint(ctx: JobContext) -> None:
         finishing = asyncio.create_task(finish_call(f"session closed: {ev.reason}"))
 
     # The transcript gets its own guards (NameGuard keeps per-call state), fed the same text.
-    transcript = [LeadingAckGuard(lambda: state.acknowledged), NameGuard(lambda: state.first_name)]
-    agent = Riley(transcript_transforms=transcript)
+    transcript = spoken_guards(state)
+    agent = Riley(transcript_transforms=transcript, digit_hold=digit_hold)
 
     # --- Hanging up under an agent simulation --------------------------------------------
     # The simulator collects check_final_state's verdict over a link that closes with the
@@ -453,7 +503,9 @@ async def entrypoint(ctx: JobContext) -> None:
             logger.info("wrong final state: line left open for the simulator to grade")
 
         session.shutdown = hang_up  # type: ignore[method-assign]
-        agent = SimulatedRiley(lambda: hung_up, transcript_transforms=transcript)
+        agent = SimulatedRiley(
+            lambda: hung_up, transcript_transforms=transcript, digit_hold=digit_hold
+        )
 
     await session.start(
         agent=agent,

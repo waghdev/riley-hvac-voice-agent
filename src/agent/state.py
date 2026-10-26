@@ -55,12 +55,14 @@ class CallState:
     # whether this caller turn already got a spoken "Got it." (main.py resets it each turn);
     # `acks_said` rotates the wording, and `ack_line` is what this turn's was (None if it
     # couldn't be said). `caller_turns`: how many times the caller has spoken, set by tools.py
-    # from the session history before each tool runs.
+    # from the session history before each tool runs. `confirmed_aloud`: code said "You're all
+    # set for ..." this turn, so the reply mustn't say it again (also reset each turn).
     expecting: str | None = None
     acknowledged: bool = False
     acks_said: int = 0
     ack_line: str | None = None
     caller_turns: int = 0
+    confirmed_aloud: bool = False
 
     @property
     def closing(self) -> bool:
