@@ -171,6 +171,16 @@ Gemini rate-limit hits). Target: $0.
 
 ## Session log
 
+### 2026-10-27 (evening): repo public as riley-hvac-voice-agent
+
+- Pre-public audit of all 85 commits: no secrets or `.env` values; third-party code is MIT.
+  Added an MIT LICENSE; the author line is "Dev Wagh"; the model-invented non-555 number in
+  tests and docs became a fictional 555 one (older commits still have it).
+- Renamed the GitHub repo and Python project to `riley-hvac-voice-agent` and made it public
+  (Dev's yes). README filled in; `docs/retell-vs-custom.md` is an outline for Dev.
+- Dev's to do: demo video, the Retell comparison, browser calls. Check that Vercel still deploys
+  on the next push to `web/` after the rename.
+
 ### 2026-10-27 (later): LiveKit Inference first with a free-tier fallback; two bugs fixed
 
 - Dev's Google AI Pro plan: its higher limits apply only in the AI Studio web app; its $10
