@@ -2,6 +2,78 @@
 
 One entry per decision: date, decision, alternatives considered, reason. Newest at the top.
 
+## 2026-10-27: LiveKit Inference first, the Gemini free tier as fallback (Dev approved)
+
+- **Decision:** Riley's LLM is LiveKit's `llm.FallbackAdapter` over two models
+  (`main.build_llm`, `main.with_fallback`): `google/gemini-3.1-flash-lite` on LiveKit
+  Inference, paid from the Build plan's $2.50 monthly credit, then `gemini-3.5-flash-lite` on
+  the Gemini free tier with Dev's key. When Inference refuses (the credit runs out mid-month),
+  the request goes to the free tier and the call carries on. `LLM_MODEL` and
+  `LLM_FALLBACK_MODEL` set them; locally `.env` has `LLM_MODEL=gemini-3.5-flash-lite` and no
+  fallback, so testing never spends the credit callers need.
+- **Why this route:** it costs $0. Gemini paid was the other option: Dev's Google AI Pro plan
+  includes $10 a month of Cloud credit that Google says covers the Gemini API, but Google asks
+  for a ₹500 (about $5) prepayment before credits apply, and Dev preferred LiveKit. The plan's
+  higher limits apply only inside the AI Studio web app, not to API keys. On Inference, Gemini
+  3.1 Flash Lite gets 100 requests a minute, not 15, and measured 1,409 ms p50 in the Oct 25
+  audio run. Build allowances reset on the 1st of each calendar month and don't roll over
+  (quotas docs), so the credit is back on Nov 1; until then every request falls back.
+- **How the fallback behaves (installed source, livekit-agents 1.8.8), defaults kept:**
+  - One attempt per model: a refusal moves on at once. If both fail, the session's own
+    retries rerun the pair (3 more times), as they retried the single model before.
+  - The failed model is marked unavailable and checked in the background after each turn
+    until it answers. `build_llm` runs per call, so every call starts on Inference again.
+  - No switch once a reply has started streaming, so the caller never hears two half replies.
+  - **Rule 6 note:** the fallback docs say the session gets an error event when a fallback
+    triggers. In 1.8.8 it doesn't: the failed model's error goes to that model, and the
+    session only listens to the adapter, which reports an error only when both fail. That
+    matters here: `close_on_fatal_error` hangs up on an unrecoverable error, so if the session
+    heard the covered failure, Riley would hang up on a call the free tier was carrying.
+    `tests/unit/test_build_llm.py` pins it with stand-in models, so an SDK upgrade that
+    changes it fails a test.
+- **Testing stays on the free tier:** the behavior suite runs on `gemini-3.5-flash-lite` (the
+  fallback model), paced under 15 requests a minute. The primary model passed the same suite on
+  Inference in M3 and M5, and audio simulations on the deployed agent test it once the credit
+  is back. Text simulations against the deployed agent spend the credit after the reset, so
+  they stay few; against a local agent they can't be paced under 15 a minute.
+- **Public page:** 4 calls a day (from 5). At about 1.5 cents a call that's up to ~120 calls
+  (~$1.80) a month, leaving room for simulations and Dev's checks. One live call at a time
+  until the reset, since until then every call is on the free tier; on Nov 1, two. The footer
+  says replies come from Google Gemini, and from Gemini's free tier when the credit runs out.
+  The Vercel overrides of `CALLS_PER_DAY` and `MAX_LIVE_CALLS` were removed, so the tested
+  defaults in `web/lib/gatekeeper.ts` are the only values.
+- **The two bugs from the audio run, each pinned by tests first (rule 7):**
+  - **A name must be one the caller gave** (`parsing.name_heard`): every word of it said by
+    the caller, whole or spelled out ("D. A. N. A."), and none of them a word for someone
+    else (mom, wife, landlord...). The model saved "mom" from "my eighty one year old mom is
+    here". A rejected name isn't saved and isn't a miss: Riley asks for it as usual.
+  - **"Mm-hmm" doesn't choose between two windows** (`parsing.only_assent`,
+    `intake.choose_window`): with two on offer, a choice needs a caller turn since the offer
+    that says more than a hum or "okay, that works". Otherwise the tool returns
+    `NO_WINDOW_CHOSEN` and Riley asks which. One window offered: "mm-hmm" takes it. Words
+    before the offer don't count, and a pick followed by "yes" still does. The list is only
+    assent words, so "either is fine", "the first one" and any time pass.
+- **Checked on the deployed agent (out-of-area text simulation, `smoke.yaml`), which found a
+  bug the local tests couldn't, since locally there's no fallback:**
+  - **First run failed:** every fallback request came back 400, "Manually set deadline 5s is
+    too short. Minimum allowed deadline is 10s." The adapter's default `attempt_timeout` (5 s)
+    reaches Google as the request deadline. Fixed with `attempt_timeout=10.0`, pinned by a
+    test; second run passed (out_of_area, final state right).
+  - **The free tier is slow at times:** in the passing call, two requests ran past the 10 s
+    deadline (504) and were retried, so the caller waited about 10 s twice. Google won't take
+    a shorter deadline. This is how every call goes until Nov 1, and afterwards only once the
+    credit runs out.
+  - **The exhausted credit isn't a clean "no":** Inference refuses in 20-40 ms, but its
+    background check sometimes succeeds (the gateway let a few requests through), so Riley
+    flips back to it and the next request pays one fast refusal. Build caps are hard, so
+    nothing can be billed.
+- **Behavior suite on this code: 19 passed, 5 stopped at the judge.** The judge's model
+  (`gemini-3.5-flash`, which Google reports as `gemini-3.6-flash`) has a free-tier limit of
+  **20 requests a day**, and today's earlier runs had used it. In all five, Riley's own
+  assertions before the judge passed: the full intake recorded name, number and ZIP through
+  the new name check, and "the twelve to two one works" chose the window. The judged checks
+  re-run after the daily reset.
+
 ## 2026-10-27: Riley's LLM on the Gemini free tier with our own key (Dev approved)
 
 - **Decision:** `LLM_MODEL=gemini-3.5-flash-lite` through the Google plugin (`google.LLM`) with
