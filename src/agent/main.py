@@ -63,9 +63,13 @@ load_dotenv(REPO_ROOT / ".env")
 logger = logging.getLogger("riley")
 
 BUSINESS = load_business()
-# A Gemini model id runs on Google AI Studio's free tier with GOOGLE_API_KEY; a "provider/model"
-# id runs on LiveKit Inference, paid from the Build plan's credit (docs/decisions.md, 2026-10-27).
-LLM_MODEL = os.getenv("LLM_MODEL", "gemini-3.5-flash-lite")
+# A "provider/model" id runs on LiveKit Inference, paid from the Build plan's monthly credit; a
+# Gemini model id runs on Google AI Studio's free tier with GOOGLE_API_KEY. Riley answers on
+# Inference, and when it refuses (the credit runs out mid-month) the fallback, on the free tier,
+# carries the call on. Locally .env sets LLM_MODEL to a free-tier model and LLM_FALLBACK_MODEL
+# empty, so testing never spends the credit callers need (docs/decisions.md, 2026-10-27).
+LLM_MODEL = os.getenv("LLM_MODEL", "google/gemini-3.1-flash-lite")
+LLM_FALLBACK_MODEL = os.getenv("LLM_FALLBACK_MODEL", "gemini-3.5-flash-lite")
 TTS_VOICE = os.getenv("TTS_VOICE", DEFAULT_TTS_VOICE)
 # Loaded once per process, so a call never waits on them. None if missing or stale (wrong text or
 # voice): Riley then says that line with live TTS instead.
@@ -107,20 +111,39 @@ SILENCE_PROMPTS = 2  # unanswered check-ins before a polite close
 
 
 def build_llm() -> llm.LLM:
-    """The production LLM; behavior tests use this too, so they test what callers get."""
-    if "/" in LLM_MODEL:
+    """The production LLM; behavior tests use this too, so they test what callers get. Built
+    per call, so each call starts on LLM_MODEL again (the credit resets on the 1st)."""
+    primary = _llm_for(LLM_MODEL)
+    if not LLM_FALLBACK_MODEL or LLM_FALLBACK_MODEL == LLM_MODEL:
+        return primary
+    return with_fallback(primary, _llm_for(LLM_FALLBACK_MODEL))
+
+
+def with_fallback(primary: llm.LLM, fallback: llm.LLM) -> llm.LLM:
+    """LiveKit's FallbackAdapter: a request that fails on `primary` goes to `fallback`, which
+    serves until a background check finds `primary` answering again.
+
+    Defaults kept: one attempt per model, so a refusal moves on at once (the session's own
+    retries rerun the pair if both fail), and no switch once a reply has started. Only a
+    failure of both reaches the session, and so close_on_fatal_error (tests/unit/test_build_llm).
+    """
+    return llm.FallbackAdapter([primary, fallback])
+
+
+def _llm_for(model: str) -> llm.LLM:
+    if "/" in model:
         # One tool call per response: a voice turn does one thing, and parallel calls made
         # end_call fire four times in one turn (debugger call, 2026-10-20).
         extra: dict[str, object] = {"parallel_tool_calls": False}
         if LLM_TEMPERATURE:
             extra["temperature"] = float(LLM_TEMPERATURE)
-        return inference.LLM(model=LLM_MODEL, extra_kwargs=extra)
+        return inference.LLM(model=model, extra_kwargs=extra)
     # The Gemini API has no parallel_tool_calls switch (the plugin ignores it); the behavior
     # suite checks that one turn doesn't end the call twice. Thinking stays at the model's
     # default, which spent no reasoning tokens on Riley's turns (benchmark, 2026-10-27).
     if LLM_TEMPERATURE:
-        return google.LLM(model=LLM_MODEL, temperature=float(LLM_TEMPERATURE))
-    return google.LLM(model=LLM_MODEL)
+        return google.LLM(model=model, temperature=float(LLM_TEMPERATURE))
+    return google.LLM(model=model)
 
 
 async def clip_frames(clip: Clip, frame_ms: int = 20) -> AsyncIterator[rtc.AudioFrame]:
@@ -151,8 +174,8 @@ def close_on_fatal_error(
     and hang up (end_with does both).
 
     Recoverable errors are retried by the SDK. An unrecoverable one means retries are exhausted
-    or the request can't succeed (the Gemini free tier's daily limit reached, or LiveKit
-    Inference refusing once the free LLM credit runs out). LiveKit's docs say to say a line
+    or the request can't succeed (for the LLM: both Inference and the free-tier fallback
+    refusing, see with_fallback). LiveKit's docs say to say a line
     before the session closes, but 1.8.8 only closes after 3 unrecoverable errors in a row
     (max_unrecoverable_errors): after one, the caller
     heard the line and then dead air (debugger call, 2026-10-25). The line is pre-rendered, so

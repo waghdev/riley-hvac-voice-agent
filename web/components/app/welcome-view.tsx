@@ -228,8 +228,9 @@ export const WelcomeView = ({
         </div>
         <p className="text-muted-foreground max-w-xl text-xs leading-5 text-pretty">
           Kestrel Comfort is a fictional business, and Riley is a demo: please don&apos;t share real
-          personal details. Riley&apos;s replies come from Google Gemini&apos;s free tier, which may
-          use what you say to improve Google&apos;s models. Built with{' '}
+          personal details. Riley&apos;s replies come from Google Gemini, and when the demo&apos;s
+          free LiveKit credit runs out, from Gemini&apos;s free tier, which may use what you say to
+          improve Google&apos;s models. Built with{' '}
           <a
             href="https://docs.livekit.io/agents"
             target="_blank"

@@ -32,6 +32,10 @@ describe('admit', () => {
     expect(ran).not.toContain('countVisitorCall');
   });
 
+  it('caps the day at 4 calls, so callers stay inside the monthly LLM credit', () => {
+    expect(DEFAULT_LIMITS.callsPerDay).toBe(4);
+  });
+
   it('takes one call at a time, since every call shares the free LLM tier', async () => {
     expect(DEFAULT_LIMITS.maxLiveCalls).toBe(1);
     expect(await admit(DEFAULT_LIMITS, checks({ live: 1 }).fake)).toEqual({

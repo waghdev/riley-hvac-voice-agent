@@ -1,8 +1,11 @@
 """Riley's conversations against the real model, in text mode (no room, no audio).
 
-Marked `llm`: these spend the Gemini free tier's daily requests (about 200 a run, judge
-included), so they run locally, not in CI:
+Marked `llm`: these spend the Gemini free tier's requests (147 a run, judge included, on
+2026-10-27), so they run locally, not in CI:
     uv run pytest -m llm tests/behavior
+The free tier allows 15 requests a minute per model, so a run must be paced under that. Riley's
+model comes from .env: locally a free-tier model with no fallback (main.LLM_MODEL), so a run
+never spends the LiveKit Inference credit that callers need.
 
 Each test pins a scenario from CLAUDE.md section 9 or a bug found in a debugger or cloud call.
 The turns are real, so the tools build CallState exactly as on a call; assertions check tool
