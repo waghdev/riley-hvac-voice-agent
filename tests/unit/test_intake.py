@@ -48,10 +48,10 @@ def test_details_can_arrive_in_any_order(s):
 
 
 def test_a_number_the_caller_never_said_is_asked_for_again(s):
-    # Audio simulation, 2026-10-25: three pieces, eight digits, recorded as 602-501-4200 and
-    # booked. Now it's a miss: Riley asks again, and gives up after two (failed_attempt_gate).
+    # Audio simulation, 2026-10-25: three pieces, eight digits, recorded as ten (two invented)
+    # and booked. Now it's a miss: Riley asks again, and gives up after two (failed_attempt_gate).
     said = ["Six zero two.", "Five.", "O. One four two."]
-    r = record_caller_details(s, CFG, callback_number="602-501-4200", caller_said=said)
+    r = record_caller_details(s, CFG, callback_number="602-555-0100", caller_said=said)
     assert (r.decision, r.next_step) == (Decision.ASK_AGAIN, "ask:callback_number")
     assert s.callback_number is None
     said.append("six oh two, five five five, oh one four two")

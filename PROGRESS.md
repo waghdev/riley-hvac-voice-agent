@@ -1,6 +1,6 @@
 # PROGRESS.md
 
-Session log for voice-agent-reference. Newest entry at the top. Update at the end of every session.
+Session log for riley-hvac-voice-agent. Newest entry at the top. Update at the end of every session.
 
 ## Current state
 
@@ -10,7 +10,7 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
   free tier as an automatic fallback (`main.with_fallback`). Until the reset every request
   falls back, and the free tier's 15 requests a minute can drop a call. M4
   (https://riley-kestrel-comfort.vercel.app) still closes after Dev's browser calls.
-- **Location:** `C:\Users\Devendra\Projects\Riley - HVAC`. Repo: https://github.com/waghdev/voice-agent-reference
+- **Location:** `C:\Users\Devendra\Projects\Riley - HVAC`. Repo: https://github.com/waghdev/riley-hvac-voice-agent
   (private until M7). LiveKit project: `riley-kestrel-comfort-heating-a` (Build).
 - **Stack as built:** Deepgram `nova-3` STT + Aura-2 TTS (Dev's key), LLM
   `google/gemini-3.1-flash-lite` on LiveKit Inference with `gemini-3.5-flash-lite` on the
@@ -79,7 +79,7 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
 - [x] (M4) `npx vercel login` (Dev); secrets set from `.env` by the CLI, never through chat
 - [x] (M4) Upstash Redis, free plan, connected to the Vercel project (Dev)
 - [x] (M4) Cloudflare Turnstile widget; keys in `.env` and Vercel (Dev)
-- [x] (M4) Vercel's GitHub app can see `voice-agent-reference`: deploy on push (Dev)
+- [x] (M4) Vercel's GitHub app can see `riley-hvac-voice-agent`: deploy on push (Dev)
 - [ ] (M6) Claim the 1 free US local number in LiveKit Cloud
 
 ## Milestones
@@ -353,7 +353,7 @@ Gemini rate-limit hits). Target: $0.
   Read them: where they assume LiveKit Inference, CLAUDE.md section 10 wins (caveats in decisions.md).
 - `lk cloud auth` refuses to run without an interactive terminal, so it's on Dev's list.
 - Created `.env` from `.env.example` (gitignored, keys empty).
-- Created https://github.com/waghdev/voice-agent-reference (private) and pushed, after a secret scan
+- Created https://github.com/waghdev/riley-hvac-voice-agent (private) and pushed, after a secret scan
   of the full history. The first CI run failed: `astral-sh/setup-uv` has no floating `v10` tag. Pinned
   `setup-uv@v10.3.0`, `checkout@v7.0.1` and `ubuntu-24.04`; CI green in 16 s.
 - Dev's standing preference: Claude does everything it can and only escalates what needs Dev

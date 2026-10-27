@@ -1,4 +1,4 @@
-# voice-agent-reference
+# Riley: an AI phone agent for HVAC service calls
 
 A production-style AI phone agent built on an open-source real-time pipeline (LiveKit Agents),
 for a fictional HVAC company. Call it, and it qualifies you, handles safety situations, and books
@@ -232,7 +232,7 @@ You need Python 3.13 with [uv](https://docs.astral.sh/uv/), the
 and a Google AI Studio key.
 
 ```bash
-git clone https://github.com/waghdev/voice-agent-reference && cd voice-agent-reference
+git clone https://github.com/waghdev/riley-hvac-voice-agent && cd riley-hvac-voice-agent
 cp .env.example .env            # fill in the keys; `lk app env -w -d .env` writes LiveKit's
 uv sync
 uv run pytest -m "not llm"      # the unit suite: no keys needed
@@ -246,10 +246,16 @@ The local mock CRM: `uv run uvicorn mock_crm.app:from_env --factory --port 8080`
 
 ## Built by
 
-Devendra (Dev) Wagh, Co-Founder & CTO at Scaile AI. Built with Claude Code.
+Dev Wagh, Co-Founder & CTO at Scaile AI. Built with Claude Code.
 
 ## Credits
 
 - Keyboard typing sounds (Riley's "thinking" sound): "keyboard typing" by Anton,
   https://freesound.org/s/137/, licensed CC BY 4.0. Bundled with LiveKit Agents.
 - Office ambience: bundled with LiveKit Agents.
+
+## License
+
+MIT, see [LICENSE](LICENSE). The web page starts from LiveKit's agent-starter-react (MIT,
+[`web/LICENSE`](web/LICENSE)); its orb animation has its own license, noted in
+[`web/README.md`](web/README.md).

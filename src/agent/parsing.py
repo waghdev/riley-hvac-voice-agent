@@ -90,8 +90,8 @@ def digits_heard(digits: str, caller_turns: Iterable[str]) -> bool:
 
     The same rule as said_by_caller, for numbers: asked for ten digits, the model filled in the
     ones it missed (audio simulation, 2026-10-25: "Six zero two." / "Five." / "O. One four two."
-    recorded as 602-501-4200). Gaps are allowed so a number given in pieces, or corrected ("it
-    ends oh one eight four"), still counts; a digit nobody said can't be matched.
+    recorded with two digits nobody said). Gaps are allowed so a number given in pieces, or
+    corrected ("it ends oh one eight four"), still counts; a digit nobody said can't be matched.
     """
     heard = iter("".join(digits_from_speech(turn) for turn in caller_turns))
     return all(d in heard for d in digits)  # `in` advances the iterator: a subsequence test

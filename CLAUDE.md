@@ -1,16 +1,16 @@
-# CLAUDE.md: voice-agent-reference
+# CLAUDE.md: riley-hvac-voice-agent
 
 Read this file fully at the start of every session, then read PROGRESS.md before doing anything.
 Project location on Dev's machine: `C:\Users\Devendra\Projects\Riley - HVAC` (Windows; use
 paths and shell commands that work there, PowerShell by default; quote the path, it has spaces).
-The repo, Python project and GitHub repo are named `voice-agent-reference`.
+The repo, Python project and GitHub repo are named `riley-hvac-voice-agent`.
 This file says WHAT we are building and the rules. PROGRESS.md says WHERE we are.
 
 ---
 
 ## 1. Who this is for and why it exists
 
-**Owner:** Devendra (Dev) Wagh, Co-Founder & CTO of Scaile AI (a fully managed AI call center).
+**Owner:** Dev Wagh, Co-Founder & CTO of Scaile AI (a fully managed AI call center).
 Dev has shipped production voice agents on Retell AI, including an AI intake call center that answers
 100% of a client's inbound calls. He knows conversation design, tool calling, deterministic decision
 gates, middleware, staging/production discipline and regression testing.
@@ -188,7 +188,7 @@ debugger; the public page in `web/` is what visitors use.
 ### Repository layout (target)
 
 ```
-voice-agent-reference/
+riley-hvac-voice-agent/
 ├─ CLAUDE.md                  this file
 ├─ PROGRESS.md                session log and current state
 ├─ README.md                  public face of the repo (skeleton exists; fill as milestones land)

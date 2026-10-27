@@ -1,5 +1,5 @@
 [project]
-name = "voice-agent-reference"
+name = "riley-hvac-voice-agent"
 version = "0.1.0"
 description = "Riley: a production-style AI phone agent on LiveKit Agents for a fictional HVAC company"
 readme = "README.md"

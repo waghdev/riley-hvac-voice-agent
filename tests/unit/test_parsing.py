@@ -89,7 +89,7 @@ def test_said_by_caller_checks_the_quote_against_the_transcript(quote, turns, sa
 
 
 # Audio simulation, 2026-10-25: the caller's number came in three pieces ("Six zero two." /
-# "Five." / "O. One four two.") and the model recorded 602-501-4200, filling in digits nobody
+# "Five." / "O. One four two.") and the model recorded ten digits, filling in two nobody
 # said. A recorded number must be made of digits the caller said, in order.
 SPLIT_NUMBER = ["Hi. My AC is making this clicking noise.", "Dana.", "Six zero two.", "Five.",
                 "O. One four two."]  # fmt: skip
@@ -100,7 +100,7 @@ CORRECTED = ["six oh two five five five oh one four eight", "no, it ends oh one 
 @pytest.mark.parametrize(
     ("digits", "turns", "heard"),
     [
-        ("6025014200", SPLIT_NUMBER, False),  # invented: only eight digits were said
+        ("6025550100", SPLIT_NUMBER, False),  # invented: only eight digits were said
         ("6025550142", ["six oh two, five five five, oh one four two"], True),
         ("6025550142", ["602-555-0142"], True),
         ("6025550142", ["six oh two", "five five five", "oh one four two"], True),  # in pieces

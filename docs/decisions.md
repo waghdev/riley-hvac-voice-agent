@@ -181,8 +181,8 @@ One entry per decision: date, decision, alternatives considered, reason. Newest 
   - Turn-taking: 1 end-of-turn misprediction, 0.3% overlapping speech, no false interruptions,
     no unanswered turns. Entity recall 100% both ways.
   - The failure was the worst bug M5 found: a number given in paused groups was cut at the
-    first pause, Riley talked over the rest, and the model recorded 602-501-4200 from eight
-    digits, read it back and booked it (the final-state check failed the run). Fixed in code:
+    first pause, Riley talked over the rest, and the model made a ten-digit number from
+    eight digits, read it back and booked it (the final-state check failed the run). Fixed in code:
     a number must be made of digits the caller said (`parsing.digits_heard`), and Riley waits
     for the rest of a partial number (`turns.DigitHold`). Also fixed: the booking
     confirmation said twice (`RepeatedConfirmationGuard`). Unit-tested, not yet re-run in
