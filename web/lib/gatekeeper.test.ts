@@ -32,6 +32,14 @@ describe('admit', () => {
     expect(ran).not.toContain('countVisitorCall');
   });
 
+  it('takes one call at a time, since every call shares the free LLM tier', async () => {
+    expect(DEFAULT_LIMITS.maxLiveCalls).toBe(1);
+    expect(await admit(DEFAULT_LIMITS, checks({ live: 1 }).fake)).toEqual({
+      ok: false,
+      reason: 'busy',
+    });
+  });
+
   it('allows the hourly limit exactly, then refuses the next call', async () => {
     const limit = DEFAULT_LIMITS.callsPerVisitorPerHour;
     expect(await admit(DEFAULT_LIMITS, checks({ visitor: limit }).fake)).toEqual({ ok: true });

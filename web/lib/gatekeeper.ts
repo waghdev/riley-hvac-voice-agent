@@ -2,7 +2,8 @@
  * Who gets a call: the abuse and cost checks in front of the token endpoint (CLAUDE.md section 7).
  *
  * Every public call spends the same free quotas as Dev's testing (LiveKit's 5 concurrent sessions,
- * agent minutes, the $2.50 monthly LLM credit), so a token is only issued when all checks pass.
+ * agent minutes, the Gemini free tier's 15 LLM requests a minute), so a token is only issued when
+ * all checks pass.
  * Pure logic with its I/O passed in, so it's tested without Cloudflare, Redis or LiveKit.
  *
  * Order matters:
@@ -19,7 +20,7 @@ export type Admission = { ok: true } | { ok: false; reason: Refusal };
 export type Limits = {
   callsPerVisitorPerHour: number;
   callsPerDay: number;
-  maxLiveCalls: number; // LiveKit Build allows 5 concurrent sessions; leave room for testing
+  maxLiveCalls: number; // counts every room in the project, testing included
 };
 
 export type Checks = {
@@ -45,7 +46,10 @@ export async function admit(limits: Limits, checks: Checks): Promise<Admission> 
 export const DEFAULT_LIMITS: Limits = {
   callsPerVisitorPerHour: 3,
   callsPerDay: 5,
-  maxLiveCalls: 4,
+  // One at a time: Riley's LLM is on the Gemini free tier, 15 requests a minute shared by every
+  // call, and one call's busiest minute uses 11 to 12 (audio simulation, 2026-10-25). A second
+  // caller would push both over, into retries and dead air.
+  maxLiveCalls: 1,
 };
 
 /** Limits from the environment, falling back to the defaults for anything unset or invalid. */

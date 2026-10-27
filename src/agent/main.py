@@ -43,7 +43,7 @@ from livekit.agents import (
 from livekit.agents.beta.tools import EndCallTool
 from livekit.agents.llm import ChatMessage
 from livekit.agents.simulation import SimulationMode
-from livekit.plugins import ai_coustics, deepgram
+from livekit.plugins import ai_coustics, deepgram, google
 
 from agent import prompts, scenarios, tools
 from agent.clips import Clip, load_clip
@@ -63,7 +63,9 @@ load_dotenv(REPO_ROOT / ".env")
 logger = logging.getLogger("riley")
 
 BUSINESS = load_business()
-LLM_MODEL = os.getenv("LLM_MODEL", "google/gemini-3.1-flash-lite")
+# A Gemini model id runs on Google AI Studio's free tier with GOOGLE_API_KEY; a "provider/model"
+# id runs on LiveKit Inference, paid from the Build plan's credit (docs/decisions.md, 2026-10-27).
+LLM_MODEL = os.getenv("LLM_MODEL", "gemini-3.5-flash-lite")
 TTS_VOICE = os.getenv("TTS_VOICE", DEFAULT_TTS_VOICE)
 # Loaded once per process, so a call never waits on them. None if missing or stale (wrong text or
 # voice): Riley then says that line with live TTS instead.
@@ -104,14 +106,21 @@ SILENCE_SECONDS = 7.0  # caller silent this long -> "Are you still there?" (CLAU
 SILENCE_PROMPTS = 2  # unanswered check-ins before a polite close
 
 
-def build_llm() -> inference.LLM:
+def build_llm() -> llm.LLM:
     """The production LLM; behavior tests use this too, so they test what callers get."""
-    # One tool call per response: a voice turn does one thing, and parallel calls made
-    # end_call fire four times in one turn (debugger call, 2026-10-20).
-    extra: dict[str, object] = {"parallel_tool_calls": False}
+    if "/" in LLM_MODEL:
+        # One tool call per response: a voice turn does one thing, and parallel calls made
+        # end_call fire four times in one turn (debugger call, 2026-10-20).
+        extra: dict[str, object] = {"parallel_tool_calls": False}
+        if LLM_TEMPERATURE:
+            extra["temperature"] = float(LLM_TEMPERATURE)
+        return inference.LLM(model=LLM_MODEL, extra_kwargs=extra)
+    # The Gemini API has no parallel_tool_calls switch (the plugin ignores it); the behavior
+    # suite checks that one turn doesn't end the call twice. Thinking stays at the model's
+    # default, which spent no reasoning tokens on Riley's turns (benchmark, 2026-10-27).
     if LLM_TEMPERATURE:
-        extra["temperature"] = float(LLM_TEMPERATURE)
-    return inference.LLM(model=LLM_MODEL, extra_kwargs=extra)
+        return google.LLM(model=LLM_MODEL, temperature=float(LLM_TEMPERATURE))
+    return google.LLM(model=LLM_MODEL)
 
 
 async def clip_frames(clip: Clip, frame_ms: int = 20) -> AsyncIterator[rtc.AudioFrame]:
@@ -142,9 +151,10 @@ def close_on_fatal_error(
     and hang up (end_with does both).
 
     Recoverable errors are retried by the SDK. An unrecoverable one means retries are exhausted
-    or the request can't succeed (LiveKit Inference refusing once the free LLM credit runs
-    out). LiveKit's docs say to say a line before the session closes, but 1.8.8 only closes
-    after 3 unrecoverable errors in a row (max_unrecoverable_errors): after one, the caller
+    or the request can't succeed (the Gemini free tier's daily limit reached, or LiveKit
+    Inference refusing once the free LLM credit runs out). LiveKit's docs say to say a line
+    before the session closes, but 1.8.8 only closes after 3 unrecoverable errors in a row
+    (max_unrecoverable_errors): after one, the caller
     heard the line and then dead air (debugger call, 2026-10-25). The line is pre-rendered, so
     it plays even when TTS is what failed.
     """

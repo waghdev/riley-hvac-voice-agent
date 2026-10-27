@@ -1,6 +1,7 @@
 """Riley's conversations against the real model, in text mode (no room, no audio).
 
-Marked `llm`: these spend LiveKit Inference credit, so they run locally, not in CI:
+Marked `llm`: these spend the Gemini free tier's daily requests (about 200 a run, judge
+included), so they run locally, not in CI:
     uv run pytest -m llm tests/behavior
 
 Each test pins a scenario from CLAUDE.md section 9 or a bug found in a debugger or cloud call.
@@ -13,7 +14,8 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import pytest
-from livekit.agents import AgentSession, ChatContext, inference, mock_tools
+from livekit.agents import AgentSession, ChatContext, mock_tools
+from livekit.plugins import google
 
 from agent import prompts, tools
 from agent.calendar import Calendar
@@ -24,7 +26,9 @@ from agent.state import CallState, Outcome
 
 pytestmark = pytest.mark.llm
 
-JUDGE_MODEL = "openai/gpt-4.1-mini"  # stronger than Riley's model; used for judging only
+# Stronger than Riley's model; used for judging only. Free tier, like Riley's (gemini-3.8-flash
+# timed out on every request there, 2026-10-27).
+JUDGE_MODEL = "gemini-3.5-flash"
 # "Thanks for calling." and "Thanks for checking with us." close a call too (behavior runs,
 # 2026-10-22: out-of-area replies ended with them, and the test counted no goodbye).
 FAREWELL = re.compile(
@@ -79,7 +83,7 @@ async def session():
 
 @pytest.fixture
 async def judge():
-    async with inference.LLM(model=JUDGE_MODEL) as llm:
+    async with google.LLM(model=JUDGE_MODEL) as llm:
         yield llm
 
 
