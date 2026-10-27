@@ -53,12 +53,14 @@ class StandIn(llm.LLM):
     def __init__(self, name: str, reply: str | None) -> None:
         super().__init__()
         self._name, self.reply = name, reply
+        self.timeouts: list[float] = []  # each request's timeout, as the adapter set it
 
     @property
     def model(self) -> str:
         return self._name
 
     def chat(self, *, chat_ctx, tools=None, conn_options=None, **kwargs) -> llm.LLMStream:
+        self.timeouts.append(conn_options.timeout)
         return _StandInStream(self, chat_ctx=chat_ctx, tools=tools or [], conn_options=conn_options)
 
 
@@ -88,6 +90,16 @@ async def test_when_inference_refuses_the_free_tier_answers_and_the_call_goes_on
     # fallback docs say the session hears of it). If it reached the session, Riley would hang
     # up on a call the free tier was carrying.
     assert errors == []
+
+
+async def test_each_model_gets_a_timeout_gemini_accepts():
+    # Bug (text simulation on the deployed agent, 2026-10-27): every fallback request came back
+    # 400 "Manually set deadline 5s is too short. Minimum allowed deadline is 10s." The adapter
+    # gives each model its attempt timeout (5 s by default), and the Gemini plugin sends it to
+    # Google as the request deadline. So the fallback never answered.
+    free_tier = StandIn("free tier", "Got it.")
+    await reply_from(main.with_fallback(StandIn("inference", None), free_tier))
+    assert free_tier.timeouts and min(free_tier.timeouts) >= 10.0
 
 
 async def test_when_both_fail_the_session_hears_it_and_riley_hangs_up():

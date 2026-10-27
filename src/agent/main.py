@@ -123,11 +123,14 @@ def with_fallback(primary: llm.LLM, fallback: llm.LLM) -> llm.LLM:
     """LiveKit's FallbackAdapter: a request that fails on `primary` goes to `fallback`, which
     serves until a background check finds `primary` answering again.
 
-    Defaults kept: one attempt per model, so a refusal moves on at once (the session's own
-    retries rerun the pair if both fail), and no switch once a reply has started. Only a
-    failure of both reaches the session, and so close_on_fatal_error (tests/unit/test_build_llm).
+    One attempt per model, so a refusal moves on at once (the session's own retries rerun the
+    pair if both fail), and no switch once a reply has started (both defaults). Only a failure
+    of both reaches the session, and so close_on_fatal_error (tests/unit/test_build_llm).
     """
-    return llm.FallbackAdapter([primary, fallback])
+    # Each model's request timeout, the SDK's usual 10 s. The adapter's default is 5 s, which
+    # the Gemini plugin sends as the request deadline, and Google refuses anything under 10 s
+    # (400 "Minimum allowed deadline is 10s"; deployed simulation, 2026-10-27).
+    return llm.FallbackAdapter([primary, fallback], attempt_timeout=10.0)
 
 
 def _llm_for(model: str) -> llm.LLM:
