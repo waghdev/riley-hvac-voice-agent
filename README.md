@@ -4,40 +4,92 @@ A production-style AI phone agent built on an open-source real-time pipeline (Li
 for a fictional HVAC company. Call it, and it qualifies you, handles safety situations, and books
 a service appointment.
 
-> Status: in progress. Sections marked TODO fill in as milestones land.
+Every piece of the real-time path is in this repo: speech-to-text, the LLM, text-to-speech, turn
+detection, interruptions, tools, a tested decision layer, latency measurement and evaluations.
 
 ## Try it
 
 **[Talk to Riley](https://riley-kestrel-comfort.vercel.app)** from any browser, no phone needed.
-Kestrel Comfort is a fictional business: use a made-up name and a 555 number. Calls are capped
-(a few per visitor per hour, five a day), since the demo runs on free tiers.
-
-TODO: phone number for live testing (M6).
+Kestrel Comfort is a fictional business: use a made-up name, a 555 number and a Phoenix ZIP such
+as 85016. Calls are capped (a few per visitor per hour, four a day, one at a time), since the
+demo runs on free tiers.
 
 ## Demo
 
-TODO: 60 to 90 second video of a real call.
+Video: coming soon.
 
 ## What it does
 
-TODO: one paragraph and the outcomes table (booked, safety redirect, out of area, not offered,
-callback, incomplete).
+Riley answers an inbound call with a recording disclosure. She works out why the caller is
+calling and checks every turn for a safety hazard. She collects a name, callback number, ZIP
+and the problem, then offers up to two open windows from the calendar. She reads the number and
+window back before booking, and sends the lead to the CRM. Every call ends in exactly one
+outcome, decided by code:
+
+| Outcome | When |
+| --- | --- |
+| `booked` | In the service area, a service we offer, details complete, window confirmed |
+| `safety_redirect` | Gas smell, CO alarm, burning smell, sparks or smoke: the exact safety script, then hang up |
+| `out_of_area` | The ZIP isn't served |
+| `not_offered` | A service the business doesn't provide (say, a commercial rooftop unit) |
+| `callback_requested` | The caller wants a person, has a billing question, or needs something Riley can't do |
+| `incomplete` | The caller hung up, went silent, or wouldn't give the details needed |
 
 ## Architecture
 
-TODO: Mermaid diagram (web page and token endpoint, caller, LiveKit number, room, agent worker, STT/LLM/TTS, gates, tools, mock CRM).
+```mermaid
+flowchart LR
+    V[Visitor's browser] --> W["Web page (Next.js, Vercel)"]
+    W --> T["/api/token: Turnstile, rate limits, daily cap"]
+    T -- "room token + explicit dispatch" --> R[(LiveKit Cloud room)]
+    P[Caller's phone] -.-> N[LiveKit phone number] -.-> R
+    R <--> A["Agent worker (Python, LiveKit Agents)"]
+    A --> STT["STT: Deepgram Nova-3"]
+    A --> LLM["LLM: Gemini Flash-Lite<br/>(LiveKit Inference, free-tier fallback)"]
+    A --> TTS["TTS: Deepgram Aura-2"]
+    A --> TD["Silero VAD + turn detector"]
+    A --> TL[tools.py]
+    TL --> G["gates.py: pure decisions"]
+    TL --> C[("Calendar (SQLite)")]
+    TL --> CRM["CRM client: retries, idempotency, outbox"]
+    A --> M[metrics/*.jsonl]
+```
+
+Web calls are the main channel. The phone path (dotted) is next: a free LiveKit number and a
+dispatch rule. The token endpoint keeps the LiveKit secret on the server and dispatches the agent by
+name. The decision layer (`gates.py`, `state.py`, `calendar.py`, `crm_client.py`) imports
+nothing from LiveKit, so it's tested without a network or a model.
 
 ## Latency (measured)
 
-TODO: p50/p90 per stage, web vs phone, number of calls and turns, what dominates and what was tuned.
+Measured on the deployed agent (LiveKit Cloud, us-east) by LiveKit's audio simulator: 3 calls,
+25 caller turns, 2026-10-25. Each number is one the agent actually logged per turn
+(nearest-rank percentiles, [`scripts/latency_report.py`](scripts/latency_report.py)).
 
 | Stage | p50 | p90 |
-| --- | --- | --- |
-| End of utterance | | |
-| STT final | | |
-| LLM first token | | |
-| TTS first audio | | |
-| Total response | | |
+| --- | ---: | ---: |
+| End of utterance (caller stops → turn committed) | 457 ms | 1,004 ms |
+| STT final transcript | 291 ms | 383 ms |
+| LLM first token | 479 ms | 920 ms |
+| TTS first audio | 131 ms | 149 ms |
+| **Total response** (caller stops → first agent audio) | **1,409 ms** | **2,565 ms** |
+
+The target is 900 ms p50 / 1,400 ms p90 for web, so this **doesn't meet it yet**. What
+dominates and what's been tried:
+
+- **End of utterance is the largest part.** The turn detector waits longer when it isn't sure the
+  caller has finished. Riley shortens that wait from 2.5 s to 1 s while she's asking for a name,
+  number or ZIP, and lengthens the minimum for digits, so a pause between number groups doesn't
+  cut the caller off.
+- **Tool turns need two LLM round trips** (call the tool, then reply). Riley says a short "Got
+  it." from inside the tool while the reply is written, so the caller hears something sooner.
+- **The model was chosen by measurement.** Six models were benchmarked on LiveKit Inference; the
+  Gemini free tier measured 11 to 28 s to first token from India at the start, so it isn't the
+  primary. Preemptive generation is on.
+- Dev's own browser calls in M2 measured 1,231 / 2,635 ms (6 calls, 17 turns), and he judged
+  them responsive. Phone numbers come with M6.
+
+The full log of measurements and trade-offs is in [`docs/decisions.md`](docs/decisions.md).
 
 ## The decision layer
 
@@ -83,7 +135,10 @@ Where the model wasn't reliable, the rule moved into code, each with a test:
   caller is addressed by name at most once, and a spoken "Got it." covers the tool's round trip.
 - **Evidence:** the model once filled an optional field with an invented "infant", making a call
   priority. Now it must pass the caller's own words, and code checks them against the
-  transcript; an invented quote isn't there, so the claim is dropped.
+  transcript; an invented quote isn't there, so the claim is dropped. The same idea covers
+  numbers and ZIPs (made of digits the caller said, in order) and names ("mom" from "my mom is
+  here" isn't saved as the caller's name).
+- **Choices:** with two windows on offer, a bare "mm-hmm" doesn't pick one; Riley asks which.
 
 Code: [`gates.py`](src/agent/gates.py), [`intake.py`](src/agent/intake.py),
 [`tools.py`](src/agent/tools.py), [`spoken.py`](src/agent/spoken.py). Decisions and the
@@ -130,15 +185,64 @@ outbox. Code: [`calendar.py`](src/agent/calendar.py), [`crm_client.py`](src/agen
 
 ## Testing
 
-TODO: unit, behavior and scenario layers, how to run them, and the call-quality grader.
+Three layers, cheapest first. Every bug found in a call became a test before it was fixed.
+
+| Layer | What it checks | Run |
+| --- | --- | --- |
+| **Unit** (475 tests, CI on every push) | Gates, intake logic, calendar and idempotency, CRM retries against a fake server, text normalization, the LLM fallback. No LLM, no network | `uv run pytest -m "not llm"` |
+| **Behavior** (24 tests, local) | Real multi-turn conversations in text mode with LiveKit's test framework: the right tools with the right arguments, the resulting state, and judged replies | `uv run pytest -m llm tests/behavior` |
+| **Simulations** (14 scenarios) | Whole calls played by LiveKit's simulated caller: 8 core flows plus a corrected number ([`core.yaml`](tests/scenarios/core.yaml)), price pressure and prompt injection ([`guardrails.yaml`](tests/scenarios/guardrails.yaml)), and pauses, barge-in and backchannels in audio ([`audio.yaml`](tests/scenarios/audio.yaml)) | `lk agent simulate text --scenarios tests/scenarios/core.yaml src/agent/main.py` |
+
+A simulation passes only if the judge passes the conversation **and** the call ended in the
+state the scenario expects (outcome, window, number, priority). Code checks the state, so a call
+that sounds right but booked the wrong slot fails.
+
+**Call-quality grading** ([`qa/grade_call.py`](qa/grade_call.py)): deterministic checks first,
+then an LLM rubric (accuracy, clarity, empathy, efficiency), each finding rated critical, major
+or minor. The checks are: disclosure given, no booking without an answered read-back, nothing
+booked after a closing gate, the exact safety script, and no price except the diagnostic fee.
+Exit code 1 on any critical finding.
+
+```text
+lk agent simulate export <run-id> > run.json
+uv run python -m qa.grade_call run.json --out qa/reports/run.md
+```
+
+The web page has its own tests (`cd web && pnpm test`), including the token endpoint's
+admission rules.
+
+## Running on $0
+
+Everything runs on free tiers: LiveKit Cloud's Build plan (agent hosting, 1,000 session minutes
+and $2.50 of model credit a month), Deepgram's signup credit, Google AI Studio's free tier,
+Vercel Hobby, Cloudflare Turnstile and Upstash Redis. Because visitors spend the same quotas,
+the page checks for a bot and limits calls per visitor and per day. Riley's LLM runs on the
+LiveKit credit; when it runs out mid-month, a fallback to the Gemini free tier keeps calls
+going, more slowly.
 
 ## Retell vs a custom pipeline
 
-TODO: link to docs/retell-vs-custom.md (written from production experience).
+Coming soon: [`docs/retell-vs-custom.md`](docs/retell-vs-custom.md), from shipping production
+agents on Retell AI.
 
 ## Run it yourself
 
-TODO: prerequisites, `.env`, `uv sync`, run locally, connect a phone number.
+You need Python 3.13 with [uv](https://docs.astral.sh/uv/), the
+[LiveKit CLI](https://docs.livekit.io/home/cli/), a free LiveKit Cloud project, a Deepgram key
+and a Google AI Studio key.
+
+```bash
+git clone https://github.com/waghdev/voice-agent-reference && cd voice-agent-reference
+cp .env.example .env            # fill in the keys; `lk app env -w -d .env` writes LiveKit's
+uv sync
+uv run pytest -m "not llm"      # the unit suite: no keys needed
+uv run python -m agent.main console   # talk to Riley through your mic and speakers
+uv run python -m agent.main dev       # or join rooms on LiveKit Cloud (Agent Console)
+```
+
+The local mock CRM: `uv run uvicorn mock_crm.app:from_env --factory --port 8080` (set
+`MOCK_CRM_URL`). The web page: see [`web/README.md`](web/README.md). Deploying the agent:
+`lk agent deploy`.
 
 ## Built by
 
