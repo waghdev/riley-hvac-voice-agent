@@ -43,9 +43,13 @@ class CallState:
     failed_attempts: dict[str, int] = field(default_factory=dict)  # field -> misses so far
     callback_reason: str | None = None
     # Booking. offered_windows: every window offered on this call, id -> how Riley says it
-    # ("tomorrow, 8-10 am"); choose_window only accepts these ids. held_window: the one the
-    # caller picked. read_back: what Riley read back for the caller to confirm.
+    # ("tomorrow, 8-10 am"); choose_window only accepts these ids. latest_offer: the ids in the
+    # most recent offer, and offered_at_turn: caller turns so far when it was made (a choice
+    # between two needs the caller to say which after it). held_window: the one the caller
+    # picked. read_back: what Riley read back for the caller to confirm.
     offered_windows: dict[str, str] = field(default_factory=dict)
+    latest_offer: list[str] = field(default_factory=list)
+    offered_at_turn: int = 0
     held_window: str | None = None
     read_back: ReadBack | None = None
     booking_id: str | None = None

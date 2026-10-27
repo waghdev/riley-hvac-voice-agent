@@ -186,6 +186,52 @@ def test_a_vulnerable_occupant_needs_the_callers_own_words(s, words, caller_said
     assert s.vulnerable_occupant is None and s.priority is False
 
 
+MOM = "Our AC stopped cooling. And my eighty one year old mom is here with me."
+
+
+@pytest.mark.parametrize(
+    ("name", "caller_said"),
+    [
+        # Bug (audio simulation, 2026-10-27): the model saved "mom" as the caller's first name
+        # from this turn, before Riley had asked for it.
+        ("mom", [MOM]),
+        ("Mother", ["my mother lives with me"]),  # said, but it's who they are, not a name
+        ("Jordan", ["my AC stopped cooling"]),  # nobody said it
+        ("Mary Ann", ["it's Mary"]),  # every word of the name must have been said
+    ],
+)
+def test_a_name_must_be_one_the_caller_said(s, name, caller_said):
+    r = record_caller_details(s, CFG, first_name=name, caller_said=caller_said)
+    assert s.first_name is None
+    assert s.failed_attempts == {}  # the caller didn't fail to give it: Riley just asks
+    assert (r.decision, r.next_step) == (Decision.MISSING, "ask:first_name")
+
+
+@pytest.mark.parametrize(
+    ("name", "caller_said"),
+    [
+        ("Dana", ["Dana."]),
+        ("dana", ["It's Dana, thanks"]),
+        ("Mary Ann", ["My name's Mary Ann."]),
+        ("Tom", ["Hi, this is Tom. My AC is making a buzzing noise."]),  # before Riley asked
+        ("Dana", ["D. A. N. A."]),  # spelled out, as speech-to-text writes it
+        ("Dana", ["it's D-A-N-A"]),
+    ],
+)
+def test_a_name_the_caller_said_is_recorded(s, name, caller_said):
+    record_caller_details(s, CFG, first_name=name, caller_said=caller_said)
+    assert s.first_name == name
+
+
+def test_a_rejected_name_keeps_the_one_on_file_and_the_number_still_counts(s):
+    said = ["This is Tom.", MOM, "four eight zero, five five five, zero one one seven"]
+    record_caller_details(s, CFG, first_name="Tom", caller_said=said[:1])
+    record_caller_details(
+        s, CFG, first_name="mom", callback_number="480-555-0117", caller_said=said
+    )
+    assert (s.first_name, s.callback_number) == ("Tom", "4805550117")
+
+
 def test_callback_request_collects_name_and_number_then_promises(s):
     r = request_callback(s, CFG, reason="billing")
     assert r.next_step == "ask:first_name"

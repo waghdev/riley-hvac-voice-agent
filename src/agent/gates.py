@@ -318,6 +318,16 @@ def window_taken(window_id: str) -> GateResult:
     )
 
 
+def which_window() -> GateResult:
+    """Two windows are on offer and the caller hasn't said which (only "mm-hmm" or "okay")."""
+    return GateResult(
+        Decision.NO_WINDOW_CHOSEN,
+        reason="choice_unclear",
+        say="They haven't said which window yet. Ask which of the two works better for them.",
+        next_step="choose_window",
+    )
+
+
 def booking_gate(state: CallState, cfg: BusinessConfig) -> GateResult:
     """May we book now? Only when the details are complete and eligible, a window is held, and
     the caller has answered a read-back of exactly this number and window (CLAUDE.md section 4).

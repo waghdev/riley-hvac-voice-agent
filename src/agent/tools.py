@@ -539,7 +539,13 @@ async def choose_window(context: RunContext[CallState], window_id: str) -> dict[
         )
         return {"still_open": is_open}
 
-    return await _run(context, intake.choose_window, prepare=still_open, window_id=window_id)
+    return await _run(
+        context,
+        intake.choose_window,
+        prepare=still_open,
+        window_id=window_id,
+        caller_said=_caller_said(context),  # a bare "mm-hmm" doesn't choose between two
+    )
 
 
 @function_tool

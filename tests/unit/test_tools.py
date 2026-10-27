@@ -72,10 +72,10 @@ READY = {
 }
 
 
-def new_turn(ctx) -> None:
+def new_turn(ctx, said: str = "...") -> None:
     """What main.py does when the caller speaks: a fresh turn may get its own "Got it."."""
     ctx.userdata.acknowledged = False
-    ctx.session.caller_says("...")
+    ctx.session.caller_says(said)
 
 
 @pytest.fixture
@@ -194,7 +194,7 @@ async def offered_and_chosen(ctx) -> dict:
     """The caller gives the ZIP (windows offered), then picks the first window."""
     ctx.session.caller_says("eight five oh one six")
     await tools.record_service_location(ctx, "85016")
-    new_turn(ctx)  # "the first one works"
+    new_turn(ctx, "the first one works")
     return await tools.choose_window(ctx, FIRST)
 
 
@@ -203,6 +203,18 @@ async def test_choosing_a_window_asks_for_the_read_back(backends):
     out = await offered_and_chosen(ctx)
     assert (out["decision"], out["next_step"]) == ("READ_BACK", "confirm_booking")
     assert "602-555-0142" in out["say"] and "tomorrow, 8-10 am" in out["say"]
+
+
+async def test_a_bare_mhmm_doesnt_choose_a_window(backends):
+    # Bug (audio simulation, 2026-10-27): "Mhmm." after two windows were offered, and the model
+    # chose the first. The tool hears what the caller said since the offer, not the model.
+    ctx = context(OpenSession(), **READY)
+    ctx.session.caller_says("eight five oh one six")
+    await tools.record_service_location(ctx, "85016")
+    new_turn(ctx, "Mhmm.")
+    out = await tools.choose_window(ctx, FIRST)
+    assert (out["decision"], out["next_step"]) == ("NO_WINDOW_CHOSEN", "choose_window")
+    assert ctx.userdata.held_window is None
 
 
 async def test_booking_in_the_same_turn_as_the_read_back_is_refused(backends):

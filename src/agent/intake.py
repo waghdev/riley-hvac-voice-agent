@@ -27,10 +27,18 @@ from agent.gates import (
     service_offered_gate,
     terminal_outcome,
     urgency_gate,
+    which_window,
     window_taken,
     windows_gate,
 )
-from agent.parsing import digits_heard, normalize_phone, normalize_zip, said_by_caller
+from agent.parsing import (
+    digits_heard,
+    name_heard,
+    normalize_phone,
+    normalize_zip,
+    only_assent,
+    said_by_caller,
+)
 from agent.state import CallState, Outcome, ReadBack
 
 # NOT_BOOKABLE carries the reason it can't be booked; each maps to the call's outcome.
@@ -108,7 +116,9 @@ def record_caller_details(
     caller_said: Sequence[str] | None = None,
 ) -> GateResult:
     first_name, callback_number = _given(first_name), _given(callback_number)
-    if first_name is not None:
+    # A name the caller didn't give ("mom", parsing.name_heard) is left out, not counted as a
+    # miss: the caller hasn't failed to give it, so Riley just asks for it.
+    if first_name is not None and (caller_said is None or name_heard(first_name, caller_said)):
         state.first_name = first_name
     if callback_number is not None:
         number = _heard(normalize_phone(callback_number), caller_said)
@@ -221,6 +231,9 @@ def offer_windows(
     "that window was just taken"."""
     for w in windows:
         state.offered_windows[w.id] = w.when(today)
+    if windows:  # with none found, the windows offered before are still the choice
+        state.latest_offer = [w.id for w in windows]
+        state.offered_at_turn = state.caller_turns
     result = windows_gate(state, cfg, found=len(windows), asked=asked)
     return _settle(state, replace(result, say=f"{lead_in} {result.say}".strip()))
 
@@ -237,11 +250,26 @@ def find_windows(state: CallState, cfg: BusinessConfig) -> GateResult:
 
 
 def choose_window(
-    state: CallState, cfg: BusinessConfig, window_id: str, still_open: bool
+    state: CallState,
+    cfg: BusinessConfig,
+    window_id: str,
+    still_open: bool,
+    caller_said: Sequence[str] | None = None,
 ) -> GateResult:
-    """Hold the window the caller picked; booking_gate then asks for the read-back."""
+    """Hold the window the caller picked; booking_gate then asks for the read-back.
+
+    caller_said: everything the caller has said on this call. Between two windows, a choice
+    needs a caller turn since the offer that says more than "mm-hmm" or "okay"
+    (parsing.only_assent); the model has picked one for a caller who only said "Mhmm.". None
+    skips the check (tests of other logic); tools.py always passes it."""
     if window_id not in state.offered_windows:
         raise ValueError(f"unknown window_id {window_id!r}; use the id of a window you offered")
+    if (
+        caller_said is not None
+        and len(state.latest_offer) > 1
+        and all(only_assent(turn) for turn in caller_said[state.offered_at_turn :])
+    ):
+        return _settle(state, which_window())
     if not still_open:
         state.held_window = None
         return _settle(state, window_taken(window_id))

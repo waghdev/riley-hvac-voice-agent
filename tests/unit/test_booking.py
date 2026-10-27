@@ -84,6 +84,64 @@ def test_only_offered_windows_can_be_chosen(s):
         choose_window(s, CFG, "2026-10-23T08:00", still_open=True)
 
 
+@pytest.mark.parametrize(
+    "reply",
+    # Bug (audio simulation, 2026-10-27): two windows offered, the caller said "Mhmm." while
+    # listening, and the model chose the first for them.
+    ["Mhmm.", "Mm-hmm.", "Uh-huh.", "Okay.", "Yeah, sure.", "Yes please.", "That works for me."],
+)
+def test_a_bare_yes_doesnt_choose_between_two_windows(s, reply):
+    result = choose_window(s, CFG, FIRST, still_open=True, caller_said=[reply])
+    assert (result.decision, result.next_step) == (Decision.NO_WINDOW_CHOSEN, "choose_window")
+    assert "which" in result.say.lower()
+    assert s.held_window is None and s.read_back is None
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        "The first one.",
+        "Eight to ten works.",
+        "Mhmm, the earlier one.",
+        "Uh-huh. Tomorrow. Between ten and noon works.",  # audio simulation, 2026-10-25
+        "Either is fine.",  # no preference: taking the first is right
+    ],
+)
+def test_a_reply_that_says_which_window_chooses_it(s, reply):
+    result = choose_window(s, CFG, FIRST, still_open=True, caller_said=[reply])
+    assert result.decision is Decision.READ_BACK
+    assert s.held_window == FIRST
+
+
+def test_a_pick_before_a_yes_still_counts(s):
+    # The caller named the window, Riley checked ("ten to noon?"), and they said yes.
+    said = ["Ten to noon, please.", "Yes."]
+    result = choose_window(s, CFG, SECOND, still_open=True, caller_said=said)
+    assert result.decision is Decision.READ_BACK
+
+
+def test_a_bare_yes_takes_the_only_window_offered():
+    state = CallState(call_id="t", first_name="Jordan", callback_number="6025550142",
+                      zip_code="85016", category="ac_repair", symptoms="warm air")  # fmt: skip
+    (window, *_) = pick_windows(all_windows(CFG.booking, NOW), CFG.booking, NOW, priority=False)
+    offer_windows(state, CFG, [window], asked="matching", today=NOW.date())
+    result = choose_window(state, CFG, window.id, still_open=True, caller_said=["Mhmm."])
+    assert result.decision is Decision.READ_BACK
+
+
+def test_only_what_the_caller_said_after_the_offer_picks_a_window():
+    state = CallState(call_id="t", first_name="Jordan", callback_number="6025550142",
+                      zip_code="85016", category="ac_repair", symptoms="warm air")  # fmt: skip
+    state.caller_turns = 1  # "it's been blowing warm air since ten this morning"
+    windows = pick_windows(all_windows(CFG.booking, NOW), CFG.booking, NOW, priority=False)
+    offer_windows(state, CFG, windows, asked="first", today=NOW.date())
+    said = ["it's been blowing warm air since ten this morning"]
+    # Chosen in the same turn the windows were offered: the caller hasn't heard them yet.
+    same_turn = choose_window(state, CFG, FIRST, still_open=True, caller_said=said)
+    then_mhmm = choose_window(state, CFG, FIRST, still_open=True, caller_said=[*said, "Mhmm."])
+    assert same_turn.decision is then_mhmm.decision is Decision.NO_WINDOW_CHOSEN
+
+
 def test_a_window_taken_meanwhile_is_reoffered(s):
     result = choose_window(s, CFG, FIRST, still_open=False)
     assert (result.decision, result.next_step) == (Decision.WINDOW_TAKEN, "offer_windows")

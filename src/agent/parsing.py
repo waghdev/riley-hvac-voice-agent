@@ -102,6 +102,59 @@ def _words(text: str) -> str:
     return " ".join(re.findall(r"[a-z0-9]+", text.lower()))
 
 
+# Words callers use for the people around them. The model has saved one as the caller's first
+# name: "mom" from "my eighty one year old mom is here with me" (audio simulation, 2026-10-27).
+_NOT_NAMES = frozenset({
+    "mom", "mum", "mother", "mama", "mommy", "dad", "father", "papa", "daddy", "parent",
+    "wife", "husband", "spouse", "partner", "son", "daughter", "kid", "child", "baby",
+    "grandma", "grandmother", "grandpa", "grandfather", "sister", "brother", "aunt", "uncle",
+    "friend", "neighbor", "neighbour", "roommate", "landlord", "tenant", "boss", "sir", "maam",
+    "caller", "customer", "homeowner", "owner",
+})  # fmt: skip
+
+
+def name_heard(name: str, caller_turns: Iterable[str]) -> bool:
+    """Whether `name` is a name the caller gave: every word of it said by them, whole or spelled
+    out ("D. A. N. A."), and none of them a word for someone else ("mom").
+
+    The same idea as said_by_caller, for names: asked to fill first_name, the model has used
+    a word from the caller's sentence that isn't their name.
+    """
+    words = _words(name).split()
+    if not words or any(w in _NOT_NAMES for w in words):
+        return False
+    said = [_words(turn).split() for turn in caller_turns]
+    return all(any(w in turn or _spelled(w, turn) for turn in said) for w in words)
+
+
+def _spelled(word: str, turn: list[str]) -> bool:
+    """Whether the turn spells `word` letter by letter: speech-to-text writes a spelled name
+    as single letters ("D. A. N. A." or "D-A-N-A"), which _words splits into ["d", "a", ...]."""
+    letters = list(word)
+    n = len(letters)
+    return n > 1 and any(turn[i : i + n] == letters for i in range(len(turn) - n + 1))
+
+
+# What callers say to show they're listening, or to agree, without picking anything: "mm-hmm",
+# "okay", "sure, that works for me". Times, days and "the first one" aren't in it.
+_HUMS = re.compile(r"[mh]+|u+h+|h+u+h+|u+h*m+|a+h+|o+h+")
+_ASSENT = frozenset({
+    "yes", "yeah", "yep", "yup", "ya", "yah", "ok", "okay", "okey", "sure", "right", "alright",
+    "all", "fine", "good", "great", "perfect", "cool", "sounds", "that", "s", "ll", "works",
+    "work", "will", "for", "me", "please", "thanks", "thank", "you", "so", "well",
+})  # fmt: skip
+
+
+def only_assent(text: str) -> bool:
+    """Whether a turn is nothing but "I'm listening" or "yes": every word a hum or an assent.
+
+    Bug (audio simulation, 2026-10-27): two windows offered, the caller said "Mhmm." while
+    Riley spoke, and the model chose the first window for them.
+    """
+    words = _words(text).split()
+    return bool(words) and all(w in _ASSENT or _HUMS.fullmatch(w) for w in words)
+
+
 def said_by_caller(quote: str | None, caller_turns: Iterable[str]) -> bool:
     """Whether the caller really said `quote` (case and punctuation ignored).
 
