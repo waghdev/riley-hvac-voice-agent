@@ -2,6 +2,51 @@
 
 One entry per decision: date, decision, alternatives considered, reason. Newest at the top.
 
+## 2026-10-27: Riley's LLM on the Gemini free tier with our own key (Dev approved)
+
+- **Decision:** `LLM_MODEL=gemini-3.5-flash-lite` through the Google plugin (`google.LLM`) with
+  `GOOGLE_API_KEY`, on Google AI Studio's free tier. A `provider/model` id still routes to
+  LiveKit Inference (`main.build_llm`), so going back when the Build credit resets is one setting.
+  Only the LLM changes: LiveKit Cloud, Deepgram and Riley's code stay as they are. Back in line
+  with CLAUDE.md section 10 (own keys, not Inference).
+- **Why:** the $2.50 Inference credit ran out on 2026-10-26 and can't carry testing and visitors.
+  Groq's free tier (8K tokens a minute, 200K a day) can't carry one call: Riley sends ~2,300
+  tokens a request before history, ~25-50K a minute. Cerebras is a 5-requests-a-minute trial.
+  The Gemini free tier, 16 s to first token at M0, now answers Riley's real intake quickly.
+- **Measured (2026-10-27, from India):** Riley's full intake through the plugin, 12 requests:
+  time to first token p50 1.31 s, p90 1.90 s (prompt ~2,950 tokens with history, 0 reasoning
+  tokens at the default thinking level, so nothing to turn off). `gemini-3.1-flash-lite` on the
+  free tier was erratic (1.7-56 s).
+- **Free-tier limit, from Google's 429:** 15 requests a minute per project per model
+  (`GenerateRequestsPerMinutePerProjectPerModel-FreeTier`). No daily limit hit yet (over 250
+  requests on 2026-10-27). One call's busiest minute in the Oct 25 audio run used 11-12 requests
+  (counted from the transcript, leaving out lines code says), so **the page takes one live call
+  at a time** (`MAX_LIVE_CALLS=1` in `web/lib/gatekeeper.ts` and Vercel).
+- **Behavior suite:** 24/24, judged by `gemini-3.5-flash` (`gemini-3.8-flash` timed out on every
+  free-tier request). A run is 147 requests (139 Riley, 8 judge), so it must be paced under 15 a
+  minute; unpaced, 11 tests failed on 429s alone. The Gemini API has no `parallel_tool_calls`
+  switch; the suite's one-goodbye test still passes.
+- **Rule 3:** the free tier may use prompts to improve Google's models. The page already asks for
+  made-up details next to the Call button; the footer now says where replies come from and that.
+- **Deployed:** `GOOGLE_API_KEY` and `LLM_MODEL` added to the agent's secrets (temporary file,
+  deleted after; the CLI adds keys without touching the others).
+- **Audio run on the deployed agent (us-east, 3 scenarios, 20 audio turns): 1 passed. Stopped
+  for Dev's decision (rule 8).**
+  - **One call alone hit the per-minute limit.** About a minute into the clicking-noise call,
+    15 requests came back 429; after the SDK's retries the error handler said "trouble on my
+    end" and hung up before the booking. Transcript counts miss what also spends the limit:
+    cancelled preemptive generations and every retry. 15 a minute can't carry even one call
+    reliably.
+  - Latency (agent records, 19 turns): total p50 1,720 ms, p90 9,143 ms (Inference on Oct 25:
+    1,409 / 2,565); the p90 is the retries. Simulator, caller-heard: p50 2,038, p95 11,259 ms.
+  - The paused-number fix works in audio: "Six zero two. Five five. Five, O one four eight" was
+    recorded as 602-555-0148, in both calls that gave one.
+  - `gemini-3.5-flash-lite` invented tool arguments: ZIP 85001 twice and 602-555-1234 (refused
+    by `digits_heard`, so Riley asked again), and "mom" as the caller's first name from "my
+    eighty one year old mom is here" (saved: names have no evidence check yet). It also took
+    "Mhmm" as a choice between two windows; the read-back caught it. Both are bugs to pin with
+    tests whichever LLM Riley ends on.
+
 ## 2026-10-25: M5 evals: LiveKit Agent Simulations, graded on final state (Dev approved)
 
 - **Runner:** LiveKit Agent Simulations, not a home-grown runner. LiveKit's simulator plays the

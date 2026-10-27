@@ -4,24 +4,28 @@ Session log for voice-agent-reference. Newest entry at the top. Update at the en
 
 ## Current state
 
-- **Milestone:** M5 Evals in progress, **stopped: the LiveKit Inference LLM credit ran out
-  (2026-10-26)**. Riley's LLM uses it, so the live demo can't converse and no LLM testing can
-  run until the next billing cycle or Dev chooses another route (see Open questions). Nothing
-  was billed (Build caps are hard). M4 (deployed 2026-10-25,
-  https://riley-kestrel-comfort.vercel.app) still closes after Dev's browser calls, which need
-  a working LLM.
+- **Milestone:** M5 Evals in progress, **stopped for Dev's decision (rule 8)**. The LiveKit
+  Inference credit ran out on 2026-10-26, so with Dev's yes Riley moved to the Gemini free tier
+  (`gemini-3.5-flash-lite`, Dev's Google key; commit `53e828f`, deployed 2026-10-27). The
+  behavior suite passes 24/24, but the free tier's 15 requests a minute can't reliably carry
+  one call: in the audio run one call hit it, retried, and hung up with "trouble on my end"
+  (decisions.md, 2026-10-27). M4 (https://riley-kestrel-comfort.vercel.app) still closes after
+  Dev's browser calls.
 - **Location:** `C:\Users\Devendra\Projects\Riley - HVAC`. Repo: https://github.com/waghdev/voice-agent-reference
   (private until M7). LiveKit project: `riley-kestrel-comfort-heating-a` (Build).
 - **Stack as built:** Deepgram `nova-3` STT + Aura-2 TTS (Dev's key), LLM
-  `google/gemini-3.1-flash-lite` on LiveKit Inference (free Build credit), `inference.TurnDetector()`,
-  bundled Silero VAD, ai-coustics `QUAIL_L`.
+  `gemini-3.5-flash-lite` on the Gemini free tier (Dev's Google key; a `provider/model`
+  `LLM_MODEL` switches back to LiveKit Inference), `inference.TurnDetector()`, bundled Silero
+  VAD, ai-coustics `QUAIL_L`.
 - **Deployed:** `riley` runs on LiveKit Cloud in `us-east` (Build plan), so latency can be measured
   the way visitors will get it. Office ambience and keyboard typing are on.
-- **Next step:** Dev decides the LLM route while the credit is out (Open questions). Then:
-  re-run the behavior suite, guardrails and the audio set to verify commit `ba90fd7`, deploy
-  it, Dev's browser calls (closes M4), and the M5 latency gap goes to Dev (rule 8).
-- **Deployed version:** commit `a08462c` (before the audio-run fixes in `ba90fd7`, which are
-  unit-tested but not deployed).
+- **Next step:** Dev picks the LLM route (Open questions). Whichever it is: pin the two bugs the
+  audio run found with tests, then fix them in code ("mom" saved as a first name; "Mhmm" taken
+  as a window choice), re-run the audio and guardrail sets, Dev's browser calls (closes M4),
+  and the M5 latency gap.
+- **Deployed version:** commit `53e828f` (Gemini free tier; includes `ba90fd7`, whose
+  paused-number fix now works in audio).
+- **Public page:** one live call at a time (`MAX_LIVE_CALLS=1`), 5 calls a day.
 - **Web page:** `web/` (Next.js), Vercel project `riley-kestrel-comfort` (scope
   `devs-projects-1e3f5727`), deploys on push when `web/` changes. The Vercel plugin can't see this
   project (404), so use the CLI (`npx vercel ... --scope devs-projects-1e3f5727`). Local: `cd web && pnpm dev` with `web/.env.local` (LiveKit values only; Turnstile and
@@ -105,6 +109,7 @@ Gemini rate-limit hits). Target: $0.
 
 | Date | Observation |
 | --- | --- |
+| 2026-10-27 | **Gemini free tier: 15 requests a minute per model** (Google's 429: `GenerateRequestsPerMinutePerProjectPerModel-FreeTier`). Over 250 requests today with no daily limit hit: benchmark, two behavior-suite runs (unpaced: 11 tests failed on 429s alone; paced under 15 a minute: 24/24, 147 requests), the audio run. Audio simulations: 20 more turns, **44 of 60 used this month** (16 left). Nothing billed: the key's project is on the Free plan. |
 | 2026-10-26 | **LiveKit Inference LLM credit exhausted** (`inference_quota_exceeded`, "wait for the next billing cycle or upgrade"). Nothing billed. Used by M5: ~25 behavior-suite runs and repeated single tests, 164 text-simulation turns (Riley's own LLM calls bill the credit), the audio run, debugger turns. The live demo's LLM is on the same credit. Gemini free tier (grader): ~40 grading calls, no limit hit. |
 | 2026-10-25 | Agent Simulations this month: **164 of 350 text turns, 24 of 60 audio turns.** The audio run also used Deepgram STT/TTS and ~6 agent session minutes. Simulation turns are free through Oct 31 on paid plans; Build has the hard allowance. |
 | 2026-10-22 | **M3 testing on LiveKit Inference:** about 12 behavior-suite runs (full or partial) and ~40 text-mode debugger turns. Estimate ~$0.20 of the $2.50 monthly credit (one full suite run is ~$0.01–0.02 with the judge). No audio-mode turns. |
@@ -126,15 +131,14 @@ Gemini rate-limit hits). Target: $0.
 
 ## Open questions
 
-- **LLM while the LiveKit Inference credit is out (Dev decides, rules 2 and 8).** Options:
-  wait for the billing-cycle reset (date on the LiveKit dashboard's billing page); a provider
-  with its own free tier and Dev's key (sign-up needed; tool calling must re-pass the behavior
-  suite); or a paid plan (only with Dev's explicit yes). The Gemini free tier measured 11-28 s
-  to first token at M0, too slow for live calls. Separately: pause the public page meanwhile
-  (daily cap 0, so visitors see "busy" instead of a broken call)?
-- **Testing budget once the LLM is back:** the $2.50 credit can't carry M5-style testing and
-  visitors. Keep behavior runs to the full suite once per change (no repeated single tests),
-  text simulations before deploys only.
+- **LLM route (Dev decides, rules 2 and 8).** The Gemini free tier passes the behavior suite
+  but its 15 requests a minute can't carry one call reliably (audio run, 2026-10-27). Options
+  in decisions.md and the 2026-10-27 session entry: Gemini paid (billing on the Google project,
+  ~2 cents a call), LiveKit Inference for live calls when the credit resets with testing on the
+  free tier, or stay free with mitigations (not enough on their own).
+- **Testing budget:** the free tier carries testing if paced under 15 requests a minute (a
+  behavior run is 147 requests, ~12 minutes). Text simulations can't be paced, so they will
+  hit the limit on the free tier.
 
 - **M1 choices approved by Dev (2026-10-20):** `inference.TurnDetector()`, a no-extra-charge noise
   cancellation model (`QUAIL_L` or Krisp NC), Gemini's default temperature of 1, fastest free Flash
@@ -158,6 +162,19 @@ Gemini rate-limit hits). Target: $0.
   scaileai.com; check Vercel Hobby terms first).
 
 ## Session log
+
+### 2026-10-27: LLM moved to the Gemini free tier; its rate limit stops live calls
+
+- Groq and Cerebras free tiers can't carry a call (8K tokens a minute; 5 requests a minute).
+  Dev approved the Gemini free tier with his existing Google key (`gemini-3.5-flash-lite`).
+- Built: `main.build_llm` routes a Gemini id to the Google plugin, a `provider/model` id to
+  LiveKit Inference; judge `gemini-3.5-flash`; the page takes one live call at a time and its
+  footer says replies come from Gemini's free tier. 445 unit tests; behavior suite 24/24
+  (paced). Committed `53e828f`, pushed (page redeployed), agent secrets and agent deployed.
+- Audio run on the deployed agent: 1/3. One call alone hit the 15-a-minute limit and hung up;
+  latency p50 1,720 / p90 9,143 ms; the model invented a first name ("mom") and took "Mhmm" as
+  a window choice. The paused-number fix works. Stopped for Dev (rule 8); options in Open
+  questions.
 
 ### 2026-10-25/26: M5 evals built; stopped when the LLM credit ran out
 
