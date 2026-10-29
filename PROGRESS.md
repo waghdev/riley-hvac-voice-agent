@@ -177,7 +177,8 @@ Gemini rate-limit hits). Target: $0.
   Added an MIT LICENSE; the author line is "Dev Wagh"; the model-invented non-555 number in
   tests and docs became a fictional 555 one (older commits still have it).
 - Renamed the GitHub repo and Python project to `riley-hvac-voice-agent` and made it public
-  (Dev's yes). README filled in; `docs/retell-vs-custom.md` is an outline for Dev.
+  (Dev's yes). README filled in. The Retell comparison comes back once Dev and Claude draft
+  it together (the outline is in commit `2d9764b`).
 - Dev's to do: demo video, the Retell comparison, browser calls. Check that Vercel still deploys
   on the next push to `web/` after the rename.
 
