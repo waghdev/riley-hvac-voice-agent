@@ -14,10 +14,6 @@ Kestrel Comfort is a fictional business: use a made-up name, a 555 number and a 
 as 85016. Calls are capped (a few per visitor per hour, four a day, one at a time), since the
 demo runs on free tiers.
 
-## Demo
-
-Video: coming soon.
-
 ## What it does
 
 Riley answers an inbound call with a recording disclosure. She works out why the caller is
@@ -86,8 +82,7 @@ dominates and what's been tried:
 - **The model was chosen by measurement.** Six models were benchmarked on LiveKit Inference; the
   Gemini free tier measured 11 to 28 s to first token from India at the start, so it isn't the
   primary. Preemptive generation is on.
-- Dev's own browser calls in M2 measured 1,231 / 2,635 ms (6 calls, 17 turns), and he judged
-  them responsive. Phone numbers come with M6.
+- Browser calls measured 1,231 / 2,635 ms (6 calls, 17 turns). Phone calls: coming next.
 
 The full log of measurements and trade-offs is in [`docs/decisions.md`](docs/decisions.md).
 
@@ -220,11 +215,6 @@ the page checks for a bot and limits calls per visitor and per day. Riley's LLM 
 LiveKit credit; when it runs out mid-month, a fallback to the Gemini free tier keeps calls
 going, more slowly.
 
-## Retell vs a custom pipeline
-
-Coming soon: [`docs/retell-vs-custom.md`](docs/retell-vs-custom.md), from shipping production
-agents on Retell AI.
-
 ## Run it yourself
 
 You need Python 3.13 with [uv](https://docs.astral.sh/uv/), the
@@ -246,7 +236,8 @@ The local mock CRM: `uv run uvicorn mock_crm.app:from_env --factory --port 8080`
 
 ## Built by
 
-Dev Wagh, Co-Founder & CTO at Scaile AI. Built with Claude Code.
+[Dev Wagh](https://www.linkedin.com/in/devendra-wagh), Co-Founder & CTO at Scaile AI. Built
+with Claude Code.
 
 ## Credits
 
