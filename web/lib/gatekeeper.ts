@@ -48,10 +48,10 @@ export const DEFAULT_LIMITS: Limits = {
   // Riley's LLM runs on the $2.50 monthly LiveKit credit, about 1.5 cents a call: 4 a day is
   // up to ~120 calls a month, which leaves some for testing (Dev's decision, 2026-10-27).
   callsPerDay: 4,
-  // One at a time until the credit resets on Nov 1: until then Riley is on the Gemini free tier,
-  // 15 requests a minute shared by every call, and one call's busiest minute uses 11 to 12
-  // (audio simulation, 2026-10-25). A second caller would push both over.
-  maxLiveCalls: 1,
+  // Two at a time: on LiveKit Inference (100 requests a minute) two calls fit easily, and one
+  // call's busiest minute uses 11 to 12 (audio simulation, 2026-10-25). Not more, because once
+  // the credit runs out calls fall back to the Gemini free tier, 15 requests a minute shared.
+  maxLiveCalls: 2,
 };
 
 /** Limits from the environment, falling back to the defaults for anything unset or invalid. */

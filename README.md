@@ -11,7 +11,7 @@ detection, interruptions, tools, a tested decision layer, latency measurement an
 
 **[Talk to Riley](https://riley-kestrel-comfort.vercel.app)** from any browser, no phone needed.
 Kestrel Comfort is a fictional business: use a made-up name, a 555 number and a Phoenix ZIP such
-as 85016. Calls are capped (a few per visitor per hour, four a day, one at a time), since the
+as 85016. Calls are capped (a few per visitor per hour, four a day, two at a time), since the
 demo runs on free tiers.
 
 ## What it does

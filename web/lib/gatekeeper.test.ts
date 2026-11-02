@@ -36,9 +36,10 @@ describe('admit', () => {
     expect(DEFAULT_LIMITS.callsPerDay).toBe(4);
   });
 
-  it('takes one call at a time, since every call shares the free LLM tier', async () => {
-    expect(DEFAULT_LIMITS.maxLiveCalls).toBe(1);
-    expect(await admit(DEFAULT_LIMITS, checks({ live: 1 }).fake)).toEqual({
+  it('takes two calls at a time, so a fallback to the free LLM tier still copes', async () => {
+    expect(DEFAULT_LIMITS.maxLiveCalls).toBe(2);
+    expect(await admit(DEFAULT_LIMITS, checks({ live: 1 }).fake)).toEqual({ ok: true });
+    expect(await admit(DEFAULT_LIMITS, checks({ live: 2 }).fake)).toEqual({
       ok: false,
       reason: 'busy',
     });
