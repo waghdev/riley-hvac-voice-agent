@@ -4,14 +4,13 @@ Session log for riley-hvac-voice-agent. Newest entry at the top. Update at the e
 
 ## Current state
 
-- **Milestone:** M5 Evals in progress, **waiting for the LiveKit credit to reset on Nov 1**.
-  Dev chose LiveKit Inference over Gemini paid (decisions.md, 2026-10-27): Riley answers on
-  `google/gemini-3.1-flash-lite` via Inference, with `gemini-3.5-flash-lite` on the Gemini
-  free tier as an automatic fallback (`main.with_fallback`). Until the reset every request
-  falls back, and the free tier's 15 requests a minute can drop a call. M4
-  (https://riley-kestrel-comfort.vercel.app) still closes after Dev's browser calls.
+- **Milestone:** M5 Evals verified on LiveKit Inference (2026-11-02); M4 closes after Dev's
+  browser calls. Riley answers on `google/gemini-3.1-flash-lite` via Inference, with
+  `gemini-3.5-flash-lite` on the Gemini free tier as an automatic fallback
+  (`main.with_fallback`); the fallback covered one Inference timeout in the Nov 2 audio run.
+  Page: https://riley-kestrel-comfort.vercel.app
 - **Location:** `C:\Users\Devendra\Projects\Riley - HVAC`. Repo: https://github.com/waghdev/riley-hvac-voice-agent
-  (private until M7). LiveKit project: `riley-kestrel-comfort-heating-a` (Build).
+  (public since 2026-10-27). LiveKit project: `riley-kestrel-comfort-heating-a` (Build).
 - **Stack as built:** Deepgram `nova-3` STT + Aura-2 TTS (Dev's key), LLM
   `google/gemini-3.1-flash-lite` on LiveKit Inference with `gemini-3.5-flash-lite` on the
   Gemini free tier (Dev's Google key) as fallback (`LLM_MODEL`, `LLM_FALLBACK_MODEL`; locally
@@ -19,20 +18,20 @@ Session log for riley-hvac-voice-agent. Newest entry at the top. Update at the e
   Silero VAD, ai-coustics `QUAIL_L`.
 - **Deployed:** `riley` runs on LiveKit Cloud in `us-east` (Build plan), so latency can be measured
   the way visitors will get it. Office ambience and keyboard typing are on.
-- **Next step, on or after Nov 1 (the credit resets on the 1st):**
-  1. Check LiveKit Cloud's Usage page shows the credit back, then confirm in `lk agent logs`
-     that calls run on Inference (no "failed, switching to next LLM" warnings).
-  2. Web: `maxLiveCalls` 1 → 2 in `web/lib/gatekeeper.ts` (and its test), push.
-  3. Re-run `tests/scenarios/audio.yaml` on the deployed agent (60 fresh audio turns), then the
-     guardrail set; record latency and the real cost per call from the Usage page.
-  4. Dev's browser calls (closes M4), then the M5 latency gap.
-- **Also next (any day):** re-run the 5 judged behavior tests that stopped at the judge's
-  daily limit (`uv run pytest -m llm tests/behavior -k "full_intake or prompt_injection or
-  reads_back_then_books or waive_fees or price_shopper"`, paced with the scratchpad plugin).
+- **Next step:**
+  1. Dev's browser calls on the public page (closes M4), and the real cost per call from LiveKit
+     Cloud's Usage page (Dev can see it; the CLI can't).
+  2. The M5 latency gap: total p50 1,290 / p90 2,655 ms against 900 / 1,400. The p90 is the
+     turn detector waiting its full 2.5 s on a few turns. Rule 8: Dev decides whether to tune
+     further or accept, as at M2.
+  3. Draft `docs/retell-vs-custom.md` with Dev, then M6 phone.
+  4. Small findings from the Nov 2 runs (judge-flagged, not failures): a price-only caller was
+     asked for a name three times; a vague "repair visit" was recorded as `ac_repair`; once
+     Riley's goodbye after end_call didn't reach the transcript.
 - **Deployed version:** commit `512aa5b` (Inference first, free-tier fallback; the name and
   window-choice fixes). Agent secrets: `LLM_MODEL=google/gemini-3.1-flash-lite`,
   `LLM_FALLBACK_MODEL=gemini-3.5-flash-lite`.
-- **Public page:** 4 calls a day, one live call at a time (code defaults in
+- **Public page:** 4 calls a day, two live calls at a time (code defaults in
   `web/lib/gatekeeper.ts`; Vercel no longer overrides them).
 - **Web page:** `web/` (Next.js), Vercel project `riley-kestrel-comfort` (scope
   `devs-projects-1e3f5727`), deploys on push when `web/` changes. The Vercel plugin can't see this
@@ -101,12 +100,14 @@ Session log for riley-hvac-voice-agent. Newest entry at the top. Update at the e
 | Web response latency p50 / p90 | ≤ 900 / 1,400 ms | **1,231 / 2,635 ms** with the M2 decision layer (6 calls, 17 turns). Later turns p50 1,119 ms (the spoken "Got it." keeps tool turns at 0.8–1.2 s); first turns p50 2,572 ms (4 of 6 hit the 2.5 s `max_delay`; being diagnosed). M1: 1,260 / 2,564. Not met yet | 2026-10-22 |
 | Phone response latency p50 / p90 | ≤ 1,200 / 1,800 ms | | |
 | Greeting start after connect | ≤ 1,000 ms web | 1,361 ms (live TTS) and 1,920 ms (pre-rendered clip), from session start. Joining the room and linking the caller took 1.3 s of the second; TTS was never the bottleneck. Measure "caller connects → first audio" from the web page in M4. Not met | 2026-10-21 |
+| Web latency, audio simulation on Inference (deployed) | ≤ 900 / 1,400 ms | **p50 1,290 / p90 2,655 ms** (agent's records, 22 turns: end of utterance 601 / 2,503, STT 240, LLM 443, TTS 79). Not met; the p90 is the 2.5 s `max_delay` on a few turns | 2026-11-02 |
 | Web latency, caller-heard (audio simulation, deployed) | ≤ 900 / 1,400 ms | **p50 1,579 / p95 2,578 ms** heard by the simulated caller; agent's own p50 1,409 / p90 2,565 ms (25 turns: end of utterance 457, STT 291, LLM 479, TTS 131). Not met | 2026-10-25 |
 | Barge-in stop time | ≤ 300 ms | Barge-in during the read-back handled (correct number booked); no false interruptions in the audio run. Yield time not reported per turn yet | 2026-10-25 |
 | Backchannels ignored | yes | "Mm-hmm" mid-turn didn't interrupt; a "Mhmm" after a question was taken as an answer (Riley began "I'm sorry, I..."). Judge passed | 2026-10-25 |
 | Numbers, ZIPs, times spoken correctly | yes | Code step before TTS (`spoken.py`, 35 unit tests); Dev's cloud calls didn't flag any | 2026-10-22 |
 | Silence handling and clean end-call | yes | Gate-ended calls hang up in code; no second goodbye; clean process exit in cloud; behavior tests green | 2026-10-22 |
-| Scenario suite pass rate | 100% | Core (text, 9): 9/9 twice. Guardrails (2): 1/2, the failure fixed (fee waiver), re-run pending. Audio (3): 2/3, the failure fixed in code, re-run pending | 2026-10-25 |
+| Scenario suite pass rate | 100% | Guardrails 2/2. Audio 3/3 on Riley's side (all booked, correct number after a correction); the runner marked one failed because the final-state check reached a closed session ("AgentSession isn't running"), a simulator race. Behavior suite 24/24 | 2026-11-02 |
+| Scenario suite pass rate (earlier) | 100% | Core (text, 9): 9/9 twice. Guardrails (2): 1/2, the failure fixed (fee waiver), re-run pending. Audio (3): 2/3, the failure fixed in code, re-run pending | 2026-10-25 |
 | QA grader: critical findings | 0 | 0 critical, 0 major, 6 minor (turns of 26-33 words) on the 9/9 core run | 2026-10-25 |
 | Dev's listening check vs Retell standard | pass | Dev, after 7 M2 cloud calls: "I don't feel any latency... the agent responds quickly" (on headphones). Accepted the measured gap (1,231 / 2,635 ms p50/p90) | 2026-10-22 |
 
@@ -117,6 +118,7 @@ Gemini rate-limit hits). Target: $0.
 
 | Date | Observation |
 | --- | --- |
+| 2026-11-02 | **Inference credit back** (reset on the 1st). Used today: 1 smoke text simulation (4 turns), the audio set (22 of 60 audio turns), the guardrail set; all LLM calls on Inference except one timeout the fallback covered. 5 judged behavior tests on the free tier (46 requests). Cost per call: read it from the Usage page. Nothing billed. |
 | 2026-10-27 (later) | **Build allowances reset on the 1st of each calendar month** (quotas docs), so the Inference credit is back Nov 1. **The judge's model (`gemini-3.5-flash`, served as `gemini-3.6-flash`) allows 20 requests a day** on the free tier; Riley's `gemini-3.5-flash-lite` hit no daily limit (another 135 requests in a paced behavior run). Text simulations: 2 smoke runs on the deployed agent, about 8 turns (~178 of 350 left). Nothing billed. |
 | 2026-10-27 | **Gemini free tier: 15 requests a minute per model** (Google's 429: `GenerateRequestsPerMinutePerProjectPerModel-FreeTier`). Over 250 requests today with no daily limit hit: benchmark, two behavior-suite runs (unpaced: 11 tests failed on 429s alone; paced under 15 a minute: 24/24, 147 requests), the audio run. Audio simulations: 20 more turns, **44 of 60 used this month** (16 left). Nothing billed: the key's project is on the Free plan. |
 | 2026-10-26 | **LiveKit Inference LLM credit exhausted** (`inference_quota_exceeded`, "wait for the next billing cycle or upgrade"). Nothing billed. Used by M5: ~25 behavior-suite runs and repeated single tests, 164 text-simulation turns (Riley's own LLM calls bill the credit), the audio run, debugger turns. The live demo's LLM is on the same credit. Gemini free tier (grader): ~40 grading calls, no limit hit. |
@@ -170,6 +172,13 @@ Gemini rate-limit hits). Target: $0.
   scaileai.com; check Vercel Hobby terms first).
 
 ## Session log
+
+### 2026-11-02: back on LiveKit Inference; audio and guardrail runs
+
+- Smoke call on the deployed agent ran on Inference with no fallback. The page takes two
+  calls at a time (`1040bc9`; Vercel deployed it after the repo rename).
+- The 5 judged behavior tests pass (suite 24/24). Audio set: all three calls right; latency
+  p50 1,290 / p90 2,655 ms (README updated). Guardrails 2/2.
 
 ### 2026-10-27 (evening): repo public as riley-hvac-voice-agent
 

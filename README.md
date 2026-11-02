@@ -59,22 +59,26 @@ nothing from LiveKit, so it's tested without a network or a model.
 ## Latency (measured)
 
 Measured on the deployed agent (LiveKit Cloud, us-east) by LiveKit's audio simulator: 3 calls,
-25 caller turns, 2026-10-25. Each number is one the agent actually logged per turn
+22 caller turns, 2026-11-02. Each number is one the agent actually logged per turn
 (nearest-rank percentiles, [`scripts/latency_report.py`](scripts/latency_report.py)).
 
 | Stage | p50 | p90 |
 | --- | ---: | ---: |
-| End of utterance (caller stops → turn committed) | 457 ms | 1,004 ms |
-| STT final transcript | 291 ms | 383 ms |
-| LLM first token | 479 ms | 920 ms |
-| TTS first audio | 131 ms | 149 ms |
-| **Total response** (caller stops → first agent audio) | **1,409 ms** | **2,565 ms** |
+| End of utterance (caller stops → turn committed) | 601 ms | 2,503 ms |
+| STT final transcript | 240 ms | 332 ms |
+| LLM first token¹ | 443 ms | 568 ms |
+| TTS first audio | 79 ms | 129 ms |
+| **Total response** (caller stops → first agent audio) | **1,290 ms** | **2,655 ms** |
+
+¹ Most turns start with a tool call, and the caller first hears the spoken "Got it." from inside
+the tool, so the model's first token only sets the response time on plain replies (3 of the 22
+turns here). A run on 2026-10-25 measured 479 / 920 ms over more of them.
 
 The target is 900 ms p50 / 1,400 ms p90 for web, so this **doesn't meet it yet**. What
 dominates and what's been tried:
 
-- **End of utterance is the largest part.** The turn detector waits longer when it isn't sure the
-  caller has finished. Riley shortens that wait from 2.5 s to 1 s while she's asking for a name,
+- **End of utterance is the largest part,** and it makes the p90: on a few turns the turn
+  detector wasn't sure the caller had finished and waited its full 2.5 s. Riley shortens that wait from 2.5 s to 1 s while she's asking for a name,
   number or ZIP, and lengthens the minimum for digits, so a pause between number groups doesn't
   cut the caller off.
 - **Tool turns need two LLM round trips** (call the tool, then reply). Riley says a short "Got
